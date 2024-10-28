@@ -1,0 +1,434 @@
+#include <Arduino.h>
+#include <Wire.h>
+#include <MPU6050.h>
+#include <HID-Project.h>
+
+// Объявляем два MPU6050
+MPU6050 mpu1;
+MPU6050 mpu2(0x69);  // Второй гироскоп с адресом 0x69
+
+// Константы для управления
+#define MAX_SPEED 600        
+#define THRESHOLD 100          // Увеличили порог для большей чувствительности
+#define DEAD_ZONE 250          // Увеличили мертвую зону    
+#define SCROLL_DELAY 100     
+#define SMOOTHING_FACTOR 10 
+#define SCROLL_DEADZONE 20   
+#define INVERT_SCROLL -1     
+
+#define MAX_SCROLL_SPEED 5
+#define MIN_ANGLE 4         
+#define MAX_ANGLE 15         
+
+// Новые константы для улучшения отзывчивости
+#define MIN_SPEED 1           // Минимальная скорость движения курсора
+#define EXPONENTIAL_FACTOR 2.5  // Фактор для экспоненциальной кривой
+#define SMOOTHING_SAMPLES 5   // Количество сэмплов для сглаживания
+#define SCROLL_SMOOTHING_SAMPLES 10   // Увеличиваем количество сэмплов для сглаживания скроллинга
+
+float scrollAngleHistory[SCROLL_SMOOTHING_SAMPLES] = {0};  // Массив для хранения истории углов
+int scrollSmoothingIndex = 0;
+int scrollStableCount = 0;  // Счётчик стабильных углов для игнорирования малых движений
+const int stableThreshold = 10;  // Порог стабильности, который нужно достичь до начала скролла
+int SENSITIVITY = 100;
+
+
+int invertX = -1;
+int invertY = 1;
+
+int16_t offset_ax1 = 0, offset_ay1 = 0, offset_az1 = 0;
+int16_t offset_ax2 = 0, offset_ay2 = 0, offset_az2 = 0;
+
+const int pinLeftButton = 9;
+const int pinRightButton = 8;
+const int pinMiddleButton = 18;
+const int pinForwardButton = 7;
+const int pinBackButton = 6;
+const int pinCopyButton = 4;
+const int pinPasteButton = 5;
+
+const int pinVolumeEncoderA = 10;
+const int pinVolumeEncoderB = 16;
+
+int lastVolumeStateA = HIGH;
+int lastVolumeStateB = HIGH;
+int currentVolumeState = 0;
+int lastVolumeState = 0;
+int volumePosition = 0;
+
+unsigned long lastScrollTime = 0;
+unsigned long lastDebugTime = 0;
+const unsigned long DEBUG_INTERVAL = 1000;
+
+bool buttonStates[7] = {false, false, false, false, false, false, false};
+bool buttonPressed[7] = {false, false, false, false, false, false, false};
+unsigned long lastDebounceTime[7] = {0, 0, 0, 0, 0, 0, 0};
+const unsigned long debounceDelay = 50;
+
+String buttonFunctions[7] = {"LeftClick", "RightClick", "MiddleClick", "Forward", "Back", "Copy", "Paste"};
+
+// Новые переменные для сглаживания движений
+int16_t smoothedAx[SMOOTHING_SAMPLES] = {0};  // Глобальная переменная для оси X
+int16_t smoothedAy[SMOOTHING_SAMPLES] = {0};  // Глобальная переменная для оси Y
+int smoothingIndex = 0;  // Глобальный индекс для сглаживания
+
+// Фильтрация угла скроллинга
+const int FILTER_WINDOW = 10;
+float angleHistory[FILTER_WINDOW] = {0};
+int historyIndex = 0;
+
+// Переменные для фильтрации дрожаний
+int smallMovementCountX = 0;
+int smallMovementCountY = 0;
+const int smallMovementThreshold = 5; // Количество итераций до игнорирования мелких движений
+
+float calculateSmoothedAngle(float newAngle) {
+  angleHistory[historyIndex] = newAngle;
+  historyIndex = (historyIndex + 1) % FILTER_WINDOW;
+
+  float sum = 0;
+  for (int i = 0; i < FILTER_WINDOW; i++) {
+    sum += angleHistory[i];
+  }
+  return sum / FILTER_WINDOW;
+}
+
+void setup() {
+  Wire.begin();
+  Mouse.begin();
+  Keyboard.begin();
+  Consumer.begin();  
+  Serial.begin(115200);
+
+  mpu1.initialize();
+  mpu2.initialize();
+  if (!mpu1.testConnection() || !mpu2.testConnection()) {
+    while (1);
+  }
+
+  calibrateSensors();
+
+  pinMode(pinLeftButton, INPUT_PULLUP);
+  pinMode(pinRightButton, INPUT_PULLUP);
+  pinMode(pinMiddleButton, INPUT_PULLUP);
+  pinMode(pinForwardButton, INPUT_PULLUP);
+  pinMode(pinBackButton, INPUT_PULLUP);
+  pinMode(pinCopyButton, INPUT_PULLUP);
+  pinMode(pinPasteButton, INPUT_PULLUP);
+
+  pinMode(pinVolumeEncoderA, INPUT_PULLUP);
+  pinMode(pinVolumeEncoderB, INPUT_PULLUP);
+}
+
+void loop() {
+  processMouseMovement();
+  handleButtons();
+  handleScroll();
+  handleVolumeEncoder();
+
+  if (Serial.available() > 0) {
+    handleSerialInput();
+  }
+
+  if (millis() - lastDebugTime > DEBUG_INTERVAL) {
+    debugOutput();
+    lastDebugTime = millis();
+  }
+
+  delay(1);  // Минимальная задержка для плавной работы
+}
+
+void processMouseMovement() {
+  int16_t ax1, ay1, az1;
+  mpu1.getAcceleration(&ax1, &ay1, &az1);
+
+  ax1 -= offset_ax1;
+  ay1 -= offset_ay1;
+
+  // Применяем сглаживание для осей
+  smoothedAx[smoothingIndex] = ay1;
+  smoothedAy[smoothingIndex] = -ax1;
+  smoothingIndex = (smoothingIndex + 1) % SMOOTHING_SAMPLES;
+
+  int32_t sumAx = 0, sumAy = 0;
+  for (int i = 0; i < SMOOTHING_SAMPLES; i++) {
+    sumAx += smoothedAx[i];
+    sumAy += smoothedAy[i];
+  }
+
+  float avgAx = (float)sumAx / SMOOTHING_SAMPLES;
+  float avgAy = (float)sumAy / SMOOTHING_SAMPLES;
+
+  // Условие для мёртвой зоны
+  if (abs(avgAx) < DEAD_ZONE) avgAx = 0;
+  if (abs(avgAy) < DEAD_ZONE) avgAy = 0;
+
+  int mouseX = calculateImprovedSpeed(avgAx) * invertX;
+  int mouseY = calculateImprovedSpeed(avgAy) * invertY;
+
+  // Фильтрация малых движений
+  if (mouseX != 0 || mouseY != 0) {
+    Mouse.move(mouseX, mouseY, 0);
+  }
+
+  // Теперь для скроллинга
+  float scrollAngle = atan2(ay1, az1) * 180.0 / PI;
+
+  // Применяем сглаживание для угла скроллинга
+  scrollAngleHistory[scrollSmoothingIndex] = scrollAngle;
+  scrollSmoothingIndex = (scrollSmoothingIndex + 1) % SCROLL_SMOOTHING_SAMPLES;
+
+  float sumScrollAngle = 0;
+  for (int i = 0; i < SCROLL_SMOOTHING_SAMPLES; i++) {
+    sumScrollAngle += scrollAngleHistory[i];
+  }
+  float smoothedScrollAngle = sumScrollAngle / SCROLL_SMOOTHING_SAMPLES;
+
+  // Условие для более стабильного начала скроллинга
+  if (abs(smoothedScrollAngle) > SCROLL_DEADZONE) {
+    scrollStableCount++;
+    if (scrollStableCount >= stableThreshold) {
+      int scrollSpeed = map(abs(smoothedScrollAngle), SCROLL_DEADZONE, MAX_ANGLE, 0, MAX_SCROLL_SPEED);
+      scrollSpeed = constrain(scrollSpeed, 0, MAX_SCROLL_SPEED);
+      Mouse.move(0, 0, scrollSpeed * INVERT_SCROLL);
+    }
+  } else {
+    scrollStableCount = 0;  // Сбрасываем счётчик стабильности, если угол меньше порога
+  }
+}
+
+int calculateImprovedSpeed(float accelValue) {
+  if (abs(accelValue) < THRESHOLD) {
+    return 0;
+  }
+  
+  // Нормализуем значение ускорения
+  float normalizedValue = (float)(abs(accelValue) - THRESHOLD) / (16384 - THRESHOLD);
+  
+  // Применяем экспоненциальную кривую для большей точности на малых углах
+  float expValue = pow(normalizedValue, EXPONENTIAL_FACTOR);
+  
+  // Рассчитываем скорость, обеспечивая минимальное значение
+  int speed = (int)(expValue * (MAX_SPEED - MIN_SPEED) + MIN_SPEED);
+  
+  // Ограничиваем максимальную скорость
+  speed = constrain(speed, MIN_SPEED, MAX_SPEED);
+
+  return (accelValue < 0) ? -speed : speed;
+}
+
+void calibrateSensors() {
+  int16_t ax, ay, az;
+  const int numReadings = 100;
+  long sum_ax1 = 0, sum_ay1 = 0, sum_az1 = 0;
+  long sum_ax2 = 0, sum_ay2 = 0, sum_az2 = 0;
+
+  for (int i = 0; i < numReadings; i++) {
+    mpu1.getAcceleration(&ax, &ay, &az);
+    sum_ax1 += ax;
+    sum_ay1 += ay;
+    sum_az1 += az;
+    delay(10);
+  }
+  offset_ax1 = sum_ax1 / numReadings;
+  offset_ay1 = sum_ay1 / numReadings;
+  offset_az1 = sum_az1 / numReadings;
+
+  for (int i = 0; i < numReadings; i++) {
+    mpu2.getAcceleration(&ax, &ay, &az);
+    sum_ax2 += ax;
+    sum_ay2 += ay;
+    sum_az2 += az;
+    delay(10);
+  }
+  offset_ax2 = sum_ax2 / numReadings;
+  offset_ay2 = sum_ay2 / numReadings;
+  offset_az2 = sum_az2 / numReadings;
+}
+
+void handleScroll() {
+  int16_t ax2, ay2, az2;
+  mpu2.getAcceleration(&ax2, &ay2, &az2);
+
+  ax2 -= offset_ax2;
+  ay2 -= offset_ay2;
+  az2 -= offset_az2;
+
+  int16_t tilt = ay2;
+  float angle = (float)tilt / 16384.0 * 90.0;
+
+  angle = calculateSmoothedAngle(angle);  // Применение фильтрации
+
+  if (abs(angle) > MIN_ANGLE) {
+    int direction = (angle > 0) ? 1 : -1;
+    float scrollSpeed = map(constrain(abs(angle), MIN_ANGLE, MAX_ANGLE), MIN_ANGLE, MAX_ANGLE, 1, MAX_SCROLL_SPEED);
+    unsigned long currentTime = millis();
+
+    if (currentTime - lastScrollTime > SCROLL_DELAY) {
+      Mouse.move(0, 0, scrollSpeed * direction * INVERT_SCROLL);
+      lastScrollTime = currentTime;
+    }
+  }
+}
+
+void handleButtons() {
+  int buttons[7] = {pinLeftButton, pinRightButton, pinMiddleButton, pinForwardButton, pinBackButton, pinCopyButton, pinPasteButton};
+
+  for (int i = 0; i < 7; i++) {
+    bool reading = !digitalRead(buttons[i]);
+
+    if (reading != buttonStates[i]) {
+      lastDebounceTime[i] = millis();
+    }
+
+    if ((millis() - lastDebounceTime[i]) > debounceDelay) {
+      if (reading && !buttonPressed[i]) {
+        performButtonFunction(i);
+        buttonPressed[i] = true;
+      } else if (!reading && buttonPressed[i]) {
+        Mouse.release(MOUSE_LEFT);
+        Mouse.release(MOUSE_RIGHT);
+        Mouse.release(MOUSE_MIDDLE);
+        buttonPressed[i] = false;
+      }
+    }
+
+    buttonStates[i] = reading;
+  }
+}
+
+void performButtonFunction(int buttonIndex) {
+  String function = buttonFunctions[buttonIndex];
+
+  if (function == "LeftClick") {
+    Mouse.press(MOUSE_LEFT);
+  } else if (function == "RightClick") {
+    Mouse.press(MOUSE_RIGHT);
+  } else if (function == "MiddleClick") {
+    Mouse.press(MOUSE_MIDDLE);
+  } else if (function == "Forward") {
+    Keyboard.press(KEY_LEFT_ALT);
+    Keyboard.press(KEY_RIGHT_ARROW);
+    Keyboard.releaseAll();
+  } else if (function == "Back") {
+    Keyboard.press(KEY_LEFT_ALT);
+    Keyboard.press(KEY_LEFT_ARROW);
+    Keyboard.releaseAll();
+  } else if (function == "Copy") {
+    Keyboard.press(KEY_LEFT_CTRL);
+    Keyboard.press('c');
+    Keyboard.releaseAll();
+  } else if (function == "Paste") {
+    Keyboard.press(KEY_LEFT_CTRL);
+    Keyboard.press('v');
+    Keyboard.releaseAll();
+  }
+}
+
+void handleVolumeEncoder() {
+  int aState = digitalRead(pinVolumeEncoderA);
+  int bState = digitalRead(pinVolumeEncoderB);
+
+  if (aState != lastVolumeStateA) {
+    if (bState != aState) {
+      volumePosition++;
+      Consumer.write(MEDIA_VOLUME_UP);
+    } else {
+      volumePosition--;
+      Consumer.write(MEDIA_VOLUME_DOWN);
+    }
+  }
+
+  lastVolumeStateA = aState;
+  lastVolumeStateB = bState;
+}
+
+void handleSerialInput() {
+  if (Serial.available()) {
+    String command = Serial.readStringUntil('\n');
+    command.trim();
+    
+    // Подтверждение получения команды
+    Serial.print("CMD_RECEIVED:");
+    Serial.println(command);
+
+    if (command.startsWith("BTN:")) {
+      command = command.substring(4);
+      int firstColon = command.indexOf(':');
+      int secondColon = command.indexOf(':', firstColon + 1);
+      
+      if (firstColon != -1 && secondColon != -1) {
+        int buttonPin = command.substring(0, firstColon).toInt();
+        String function = command.substring(firstColon + 1, secondColon);
+        String hotkey = command.substring(secondColon + 1);
+        
+        // Находим индекс кнопки по пину
+        int buttonIndex = -1;
+        int pins[] = {pinLeftButton, pinRightButton, pinMiddleButton, 
+                     pinForwardButton, pinBackButton, pinCopyButton, pinPasteButton};
+        
+        for (int i = 0; i < 7; i++) {
+          if (pins[i] == buttonPin) {
+            buttonIndex = i;
+            break;
+          }
+        }
+        
+        if (buttonIndex != -1) {
+          buttonFunctions[buttonIndex] = function;
+          // Отправляем подтверждение применения
+          Serial.print("BTN_SET:");
+          Serial.print(buttonPin);
+          Serial.print(":");
+          Serial.println(function);
+        } else {
+          Serial.print("BTN_ERROR:");
+          Serial.println(buttonPin);
+        }
+      }
+    } 
+    else if (command.startsWith("DEAD_ZONE:")) {
+      int value = command.substring(10).toInt();
+      if (value >= 0 && value <= 500) { 
+        Serial.print("DEAD_ZONE_SET:");
+        Serial.println(value);
+      } else {
+        Serial.println("DEAD_ZONE_ERROR:Invalid value");
+      }
+    }
+    else if (command.startsWith("GET_STATUS")) {
+      sendStatus();
+    }
+    else {
+      Serial.println("ERROR:Unknown command");
+    }
+  }
+}
+
+void sendStatus() {
+  Serial.println("STATUS_BEGIN");
+  
+  // Отправка настроек кнопок
+  for (int i = 0; i < 7; i++) {
+    Serial.print("BTN_STATUS:");
+    Serial.print(i);
+    Serial.print(":");
+    Serial.println(buttonFunctions[i]);
+  }
+  
+  // Отправка текущих настроек
+  Serial.print("DEAD_ZONE_STATUS:");
+  Serial.println(DEAD_ZONE);
+  
+  // Отправка статуса MPU
+  Serial.print("MPU1_STATUS:");
+  Serial.println(mpu1.testConnection() ? "OK" : "ERROR");
+  Serial.print("MPU2_STATUS:");
+  Serial.println(mpu2.testConnection() ? "OK" : "ERROR");
+  
+  Serial.println("STATUS_END");
+}
+
+void debugOutput() {
+  // Можно оставить пустым или добавить нужную отладочную информацию
+}
