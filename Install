@@ -1,0 +1,53 @@
+To implement this project based on Arduino Pro Micro, I will provide instructions with a description of the necessary components, a connection diagram, a list of libraries, and useful recommendations for setting up.
+
+Step 1. List of components
+Arduino Pro Micro (HID compatible for mouse and keyboard emulation).
+MPU6050 sensors - 2 pcs. (gyroscopes / accelerometers for tracking movements).
+Buttons - 7 pcs. (for performing functions: left, right and middle mouse buttons, forward and back buttons, copy and paste).
+Incremental encoder - 1 pc. (for volume control).
+Wires and connectors for connecting components.
+
+Step 2. Connecting the MPU6050 components:
+MPU6050 #1:
+Connect VCC to 5V Arduino Pro Micro.
+Connect GND to GND Arduino.
+SCL - to the SCL port of Arduino (Pin 3).
+SDA — to the SDA port of the Arduino (Pin 2).
+MPU6050 #2:
+Connect in the same way as MPU6050 #1, but for the second sensor you need to set an alternative address (0x69) — this can be done by connecting AD0 to 5V.
+Buttons:
+
+Connect the buttons to the corresponding pins of the Arduino, the pins indicated:
+Left mouse button: Pin 9
+Right mouse button: Pin 8
+Middle mouse button: Pin 18
+Forward button: Pin 7
+Back button: Pin 6
+Copy: Pin 4
+Paste: Pin 5
+One contact of each button is connected to the corresponding pin of the Arduino, and the second — to the common GND.
+
+Incremental encoder:
+Connect it to Pin 10 and Pin 16 to track the position change. Also connect the encoder GND to the Arduino GND.
+
+Step 3. Required libraries
+This code requires several libraries to be installed:
+
+Wire — the standard Arduino library for I2C.
+MPU6050 — a library for working with the MPU6050 sensor. Install it via Library Manager in the Arduino IDE.
+HID-Project — a library for emulating HID devices such as a mouse and keyboard using Arduino. Also install it via Library Manager.
+
+Step 4. Upload the code to the Arduino
+Connect the Arduino Pro Micro to your computer.
+Open the Arduino IDE and select the correct board (Arduino Pro Micro) and port.
+Copy the code to the Arduino IDE.
+Upload the code to the device.
+
+Step 5. Calibration and setup
+The calibrateSensors() function calibrates the sensors to compensate for the offset. If necessary, calibrate the sensors by placing the device in a stable position. Threshold values ​​(e.g. THRESHOLD, DEAD_ZONE, SCROLL_DEADZONE) can be adjusted to adjust the sensitivity of the device to your liking.
+
+Recommendations
+Power: It is important that the power supply of the MPU6050 sensors meets their requirements (usually 3.3V or 5V).
+Anti-bounce: Button bounce is taken into account via debounceDelay. You can change this value if the buttons do not respond correctly.
+Debugging: Use the Serial Monitor for debugging to monitor button states and sensor values ​​in real time.
+Following this guide, you will be able to build the device, upload the code, and use it to control the mouse and keyboard using gestures and button presses.
