@@ -12,7 +12,7 @@ MPU6050 mpu2(0x69);
 #define SCROLL_DELAY 100     
 #define SMOOTHING_FACTOR 10 
 #define SCROLL_DEADZONE 20   
-#define INVERT_SCROLL 1     
+#define INVERT_SCROLL -1     
 
 #define MAX_SCROLL_SPEED 5
 #define MIN_ANGLE 4         
@@ -22,6 +22,9 @@ MPU6050 mpu2(0x69);
 #define EXPONENTIAL_FACTOR 2  
 #define SMOOTHING_SAMPLES 5   
 #define SCROLL_SMOOTHING_SAMPLES 10   
+
+int cursorSpeed = 5;  
+int scrollSpeed = 5;  
 
 enum EncoderMode {
   VOLUME_CONTROL,
@@ -182,9 +185,10 @@ void processMouseMovement() {
   if (abs(smoothedScrollAngle) > SCROLL_DEADZONE) {
     scrollStableCount++;
     if (scrollStableCount >= stableThreshold) {
-      int scrollSpeed = map(abs(smoothedScrollAngle), SCROLL_DEADZONE, MAX_ANGLE, 0, MAX_SCROLL_SPEED);
-      scrollSpeed = constrain(scrollSpeed, 0, MAX_SCROLL_SPEED);
-      Mouse.move(0, 0, scrollSpeed * INVERT_SCROLL);
+      int scrollSpeedAdjusted = scrollSpeed * (MAX_SCROLL_SPEED / 10.0);
+      int scrollSpeedValue = map(abs(smoothedScrollAngle), SCROLL_DEADZONE, MAX_ANGLE, 0, scrollSpeedAdjusted);
+      scrollSpeedValue = constrain(scrollSpeedValue, 0, MAX_SCROLL_SPEED);
+      Mouse.move(0, 0, scrollSpeedValue * INVERT_SCROLL);
     }
   } else {
     scrollStableCount = 0;
@@ -198,7 +202,7 @@ int calculateImprovedSpeed(float accelValue) {
   
   float normalizedValue = (float)(abs(accelValue) - THRESHOLD) / (16384 - THRESHOLD);
   float expValue = pow(normalizedValue, EXPONENTIAL_FACTOR);
-  int speed = (int)(expValue * (MAX_SPEED - MIN_SPEED) + MIN_SPEED);
+  int speed = (int)(expValue * (cursorSpeed * (MAX_SPEED / 10.0) - MIN_SPEED) + MIN_SPEED);
   speed = constrain(speed, MIN_SPEED, MAX_SPEED);
 
   return (accelValue < 0) ? -speed : speed;
@@ -248,11 +252,12 @@ void handleScroll() {
 
   if (abs(angle) > MIN_ANGLE) {
     int direction = (angle > 0) ? 1 : -1;
-    float scrollSpeed = map(constrain(abs(angle), MIN_ANGLE, MAX_ANGLE), MIN_ANGLE, MAX_ANGLE, 1, MAX_SCROLL_SPEED);
+    float scrollSpeedAdjusted = scrollSpeed * (MAX_SCROLL_SPEED / 10.0);
+    float scrollSpeedValue = map(constrain(abs(angle), MIN_ANGLE, MAX_ANGLE), MIN_ANGLE, MAX_ANGLE, 1, scrollSpeedAdjusted);
     unsigned long currentTime = millis();
 
     if (currentTime - lastScrollTime > SCROLL_DELAY) {
-      Mouse.move(0, 0, scrollSpeed * direction * INVERT_SCROLL);
+      Mouse.move(0, 0, scrollSpeedValue * direction * INVERT_SCROLL);
       lastScrollTime = currentTime;
     }
   }
@@ -273,9 +278,7 @@ void handleButtons() {
         performButtonFunction(i);
         buttonPressed[i] = true;
       } else if (!reading && buttonPressed[i]) {
-        Mouse.release(MOUSE_LEFT);
-        Mouse.release(MOUSE_RIGHT);
-        Mouse.release(MOUSE_MIDDLE);
+        releaseButtonFunction(i);
         buttonPressed[i] = false;
       }
     }
@@ -352,8 +355,33 @@ void performButtonFunction(int buttonIndex) {
     Keyboard.press(KEY_LEFT_CTRL);
     Keyboard.press('v');
     Keyboard.releaseAll();
+  } else if (function == "Ctrl") {
+    Keyboard.press(KEY_LEFT_CTRL);
+  } else if (function == "Alt") {
+    Keyboard.press(KEY_LEFT_ALT);
+  } else if (function == "Shift") {
+    Keyboard.press(KEY_LEFT_SHIFT);
   }
 }
+
+void releaseButtonFunction(int buttonIndex) {
+  String function = buttonFunctions[buttonIndex];
+
+  if (function == "LeftClick") {
+    Mouse.release(MOUSE_LEFT);
+  } else if (function == "RightClick") {
+    Mouse.release(MOUSE_RIGHT);
+  } else if (function == "MiddleClick") {
+    Mouse.release(MOUSE_MIDDLE);
+  } else if (function == "Ctrl") {
+    Keyboard.release(KEY_LEFT_CTRL);
+  } else if (function == "Alt") {
+    Keyboard.release(KEY_LEFT_ALT);
+  } else if (function == "Shift") {
+    Keyboard.release(KEY_LEFT_SHIFT);
+  }
+}
+
 
 void handleSerialInput() {
   if (Serial.available()) {
@@ -404,6 +432,18 @@ void handleSerialInput() {
       } else {
         Serial.println("DEAD_ZONE_ERROR:Invalid value");
       }
+    }
+    else if (command.startsWith("CURSOR_SPEED:")) {
+      cursorSpeed = command.substring(13).toInt();
+      cursorSpeed = constrain(cursorSpeed, 1, 10);
+      Serial.print("CURSOR_SPEED_SET:");
+      Serial.println(cursorSpeed);
+    }
+    else if (command.startsWith("SCROLL_SPEED:")) {
+      scrollSpeed = command.substring(13).toInt();
+      scrollSpeed = constrain(scrollSpeed, 1, 10);
+      Serial.print("SCROLL_SPEED_SET:");
+      Serial.println(scrollSpeed);
     }
     else if (command.startsWith("GET_STATUS")) {
       sendStatus();
