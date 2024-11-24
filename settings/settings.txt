@@ -1,1 +1,9 @@
-
+LeftClick
+RightClick
+MiddleClick
+Forward
+Back
+Copy
+Paste
+5
+9
