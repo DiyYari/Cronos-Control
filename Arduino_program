@@ -1,3 +1,4 @@
+#include <EEPROM.h>
 #include <Arduino.h>
 #include <Wire.h>
 #include <MPU6050.h>
@@ -6,7 +7,7 @@
 MPU6050 mpu1;
 MPU6050 mpu2(0x69);
 
-#define MAX_SPEED 300        
+#define MAX_SPEED 700        
 #define THRESHOLD 10         
 #define DEAD_ZONE 350           
 #define SCROLL_DELAY 100     
@@ -22,6 +23,13 @@ MPU6050 mpu2(0x69);
 #define EXPONENTIAL_FACTOR 2  
 #define SMOOTHING_SAMPLES 5   
 #define SCROLL_SMOOTHING_SAMPLES 10   
+
+#define EEPROM_INITIALIZED_FLAG 0    
+#define EEPROM_CURSOR_SPEED 1       
+#define EEPROM_SCROLL_SPEED 2      
+#define EEPROM_BUTTON_FUNCTIONS 3   
+#define EEPROM_DEAD_ZONE 20        
+#define EEPROM_SENSITIVITY 21      
 
 int cursorSpeed = 5;  
 int scrollSpeed = 5;  
@@ -86,6 +94,66 @@ int smallMovementCountX = 0;
 int smallMovementCountY = 0;
 const int smallMovementThreshold = 5;
 
+struct ButtonFunction {
+    char name[15];  
+};
+
+void saveButtonFunction(int buttonIndex, String function) {
+    int address = EEPROM_BUTTON_FUNCTIONS + (buttonIndex * sizeof(ButtonFunction));
+    ButtonFunction bf;
+    function.toCharArray(bf.name, sizeof(bf.name));
+    EEPROM.put(address, bf);
+}
+
+String loadButtonFunction(int buttonIndex) {
+    int address = EEPROM_BUTTON_FUNCTIONS + (buttonIndex * sizeof(ButtonFunction));
+    ButtonFunction bf;
+    EEPROM.get(address, bf);
+    return String(bf.name);
+}
+
+void saveAllSettings() {
+    EEPROM.write(EEPROM_INITIALIZED_FLAG, 0xAA);
+    
+    EEPROM.write(EEPROM_CURSOR_SPEED, cursorSpeed);
+    EEPROM.write(EEPROM_SCROLL_SPEED, scrollSpeed);
+    EEPROM.write(EEPROM_DEAD_ZONE, DEAD_ZONE);
+    EEPROM.write(EEPROM_SENSITIVITY, SENSITIVITY);
+    
+    for (int i = 0; i < 7; i++) {
+        saveButtonFunction(i, buttonFunctions[i]);
+    }
+}
+
+void loadAllSettings() {
+    if (EEPROM.read(EEPROM_INITIALIZED_FLAG) != 0xAA) {
+        setDefaultSettings();
+        saveAllSettings();
+        return;
+    }
+    
+    cursorSpeed = EEPROM.read(EEPROM_CURSOR_SPEED);
+    scrollSpeed = EEPROM.read(EEPROM_SCROLL_SPEED);
+    
+    // Загружаем функции кнопок
+    for (int i = 0; i < 7; i++) {
+        buttonFunctions[i] = loadButtonFunction(i);
+    }
+}
+
+void setDefaultSettings() {
+    // Устанавливаем значения по умолчанию
+    cursorSpeed = 5;
+    scrollSpeed = 5;
+    buttonFunctions[0] = "LeftClick";
+    buttonFunctions[1] = "RightClick";
+    buttonFunctions[2] = "MiddleClick";
+    buttonFunctions[3] = "Forward";
+    buttonFunctions[4] = "Back";
+    buttonFunctions[5] = "Copy";
+    buttonFunctions[6] = "Paste";
+}
+
 float calculateSmoothedAngle(float newAngle) {
   angleHistory[historyIndex] = newAngle;
   historyIndex = (historyIndex + 1) % FILTER_WINDOW;
@@ -98,30 +166,32 @@ float calculateSmoothedAngle(float newAngle) {
 }
 
 void setup() {
-  Wire.begin();
-  Mouse.begin();
-  Keyboard.begin();
-  Consumer.begin();  
-  Serial.begin(115200);
+    Wire.begin();
+    Mouse.begin();
+    Keyboard.begin();
+    Consumer.begin();  
+    Serial.begin(115200);
 
-  mpu1.initialize();
-  mpu2.initialize();
-  if (!mpu1.testConnection() || !mpu2.testConnection()) {
-    while (1);
-  }
+    mpu1.initialize();
+    mpu2.initialize();
+    if (!mpu1.testConnection() || !mpu2.testConnection()) {
+        while (1);
+    }
 
-  calibrateSensors();
+    loadAllSettings();
 
-  pinMode(pinLeftButton, INPUT_PULLUP);
-  pinMode(pinRightButton, INPUT_PULLUP);
-  pinMode(pinMiddleButton, INPUT_PULLUP);
-  pinMode(pinForwardButton, INPUT_PULLUP);
-  pinMode(pinBackButton, INPUT_PULLUP);
-  pinMode(pinCopyButton, INPUT_PULLUP);
-  pinMode(pinPasteButton, INPUT_PULLUP);
+    pinMode(pinLeftButton, INPUT_PULLUP);
+    pinMode(pinRightButton, INPUT_PULLUP);
+    pinMode(pinMiddleButton, INPUT_PULLUP);
+    pinMode(pinForwardButton, INPUT_PULLUP);
+    pinMode(pinBackButton, INPUT_PULLUP);
+    pinMode(pinCopyButton, INPUT_PULLUP);
+    pinMode(pinPasteButton, INPUT_PULLUP);
 
-  pinMode(pinVolumeEncoderA, INPUT_PULLUP);
-  pinMode(pinVolumeEncoderB, INPUT_PULLUP);
+    pinMode(pinVolumeEncoderA, INPUT_PULLUP);
+    pinMode(pinVolumeEncoderB, INPUT_PULLUP);
+
+    calibrateSensors();
 }
 
 void loop() {
@@ -140,72 +210,6 @@ void loop() {
   }
 
   delay(1);
-}
-
-void processMouseMovement() {
-  int16_t ax1, ay1, az1;
-  mpu1.getAcceleration(&ax1, &ay1, &az1);
-
-  ax1 -= offset_ax1;
-  ay1 -= offset_ay1;
-
-  smoothedAx[smoothingIndex] = ay1;
-  smoothedAy[smoothingIndex] = -ax1;
-  smoothingIndex = (smoothingIndex + 1) % SMOOTHING_SAMPLES;
-
-  int32_t sumAx = 0, sumAy = 0;
-  for (int i = 0; i < SMOOTHING_SAMPLES; i++) {
-    sumAx += smoothedAx[i];
-    sumAy += smoothedAy[i];
-  }
-
-  float avgAx = (float)sumAx / SMOOTHING_SAMPLES;
-  float avgAy = (float)sumAy / SMOOTHING_SAMPLES;
-
-  if (abs(avgAx) < DEAD_ZONE) avgAx = 0;
-  if (abs(avgAy) < DEAD_ZONE) avgAy = 0;
-
-  int mouseX = calculateImprovedSpeed(avgAx) * invertX;
-  int mouseY = calculateImprovedSpeed(avgAy) * invertY;
-
-  if (mouseX != 0 || mouseY != 0) {
-    Mouse.move(mouseX, mouseY, 0);
-  }
-
-  float scrollAngle = atan2(ay1, az1) * 180.0 / PI;
-  scrollAngleHistory[scrollSmoothingIndex] = scrollAngle;
-  scrollSmoothingIndex = (scrollSmoothingIndex + 1) % SCROLL_SMOOTHING_SAMPLES;
-
-  float sumScrollAngle = 0;
-  for (int i = 0; i < SCROLL_SMOOTHING_SAMPLES; i++) {
-    sumScrollAngle += scrollAngleHistory[i];
-  }
-  float smoothedScrollAngle = sumScrollAngle / SCROLL_SMOOTHING_SAMPLES;
-
-  if (abs(smoothedScrollAngle) > SCROLL_DEADZONE) {
-    scrollStableCount++;
-    if (scrollStableCount >= stableThreshold) {
-      int scrollSpeedAdjusted = scrollSpeed * (MAX_SCROLL_SPEED / 10.0);
-      int scrollSpeedValue = map(abs(smoothedScrollAngle), SCROLL_DEADZONE, MAX_ANGLE, 0, scrollSpeedAdjusted);
-      scrollSpeedValue = constrain(scrollSpeedValue, 0, MAX_SCROLL_SPEED);
-      Mouse.move(0, 0, scrollSpeedValue * INVERT_SCROLL);
-    }
-  } else {
-    scrollStableCount = 0;
-  }
-}
-
-int calculateImprovedSpeed(float accelValue) {
-  if (abs(accelValue) < THRESHOLD) {
-    return 0;
-  }
-  
-  float normalizedValue = (float)(abs(accelValue) - THRESHOLD) / (16384 - THRESHOLD);
-  float expValue = pow(normalizedValue, EXPONENTIAL_FACTOR);
-  int speed = (int)(expValue * (cursorSpeed * (MAX_SPEED / 10.0) - MIN_SPEED) + MIN_SPEED);
-  speed = constrain(speed, MIN_SPEED, MAX_SPEED);
-
-  return (accelValue < 0) ? -speed : speed;
 }
 
 void calibrateSensors() {
@@ -237,30 +241,48 @@ void calibrateSensors() {
   offset_az2 = sum_az2 / numReadings;
 }
 
-void handleScroll() {
-  int16_t ax2, ay2, az2;
-  mpu2.getAcceleration(&ax2, &ay2, &az2);
+void processMouseMovement() {
+  int16_t ax1, ay1, az1;
+  mpu1.getAcceleration(&ax1, &ay1, &az1);
 
-  ax2 -= offset_ax2;
-  ay2 -= offset_ay2;
-  az2 -= offset_az2;
+  ax1 -= offset_ax1;
+  ay1 -= offset_ay1;
 
-  int16_t tilt = ay2;
-  float angle = (float)tilt / 16384.0 * 90.0;
+  smoothedAx[smoothingIndex] = ay1;
+  smoothedAy[smoothingIndex] = -ax1;
+  smoothingIndex = (smoothingIndex + 1) % SMOOTHING_SAMPLES;
 
-  angle = calculateSmoothedAngle(angle);
-
-  if (abs(angle) > MIN_ANGLE) {
-    int direction = (angle > 0) ? 1 : -1;
-    float scrollSpeedAdjusted = scrollSpeed * (MAX_SCROLL_SPEED / 10.0);
-    float scrollSpeedValue = map(constrain(abs(angle), MIN_ANGLE, MAX_ANGLE), MIN_ANGLE, MAX_ANGLE, 1, scrollSpeedAdjusted);
-    unsigned long currentTime = millis();
-
-    if (currentTime - lastScrollTime > SCROLL_DELAY) {
-      Mouse.move(0, 0, scrollSpeedValue * direction * INVERT_SCROLL);
-      lastScrollTime = currentTime;
-    }
+  int32_t sumAx = 0, sumAy = 0;
+  for (int i = 0; i < SMOOTHING_SAMPLES; i++) {
+    sumAx += smoothedAx[i];
+    sumAy += smoothedAy[i];
   }
+
+  float avgAx = (float)sumAx / SMOOTHING_SAMPLES;
+  float avgAy = (float)sumAy / SMOOTHING_SAMPLES;
+
+  if (abs(avgAx) < DEAD_ZONE) avgAx = 0;
+  if (abs(avgAy) < DEAD_ZONE) avgAy = 0;
+
+  int mouseX = calculateImprovedSpeed(avgAx) * invertX;
+  int mouseY = calculateImprovedSpeed(avgAy) * invertY;
+
+  if (mouseX != 0 || mouseY != 0) {
+    Mouse.move(mouseX, mouseY, 0);
+  }
+}
+
+int calculateImprovedSpeed(float accelValue) {
+  if (abs(accelValue) < THRESHOLD) {
+    return 0;
+  }
+  
+  float normalizedValue = (float)(abs(accelValue) - THRESHOLD) / (16384 - THRESHOLD);
+  float expValue = pow(normalizedValue, EXPONENTIAL_FACTOR);
+  int speed = (int)(expValue * (cursorSpeed * (MAX_SPEED / 10.0) - MIN_SPEED) + MIN_SPEED);
+  speed = constrain(speed, MIN_SPEED, MAX_SPEED);
+
+  return (accelValue < 0) ? -speed : speed;
 }
 
 void handleButtons() {
@@ -284,6 +306,32 @@ void handleButtons() {
     }
 
     buttonStates[i] = reading;
+  }
+}
+
+void handleScroll() {
+  int16_t ax2, ay2, az2;
+  mpu2.getAcceleration(&ax2, &ay2, &az2);
+
+  ax2 -= offset_ax2;
+  ay2 -= offset_ay2;
+  az2 -= offset_az2;
+
+  int16_t tilt = ay2;
+  float angle = (float)tilt / 16384.0 * 90.0;
+
+  angle = calculateSmoothedAngle(angle);
+
+  if (abs(angle) > MIN_ANGLE) {
+    int direction = (angle > 0) ? 1 : -1;
+    float scrollSpeedAdjusted = scrollSpeed * (MAX_SCROLL_SPEED / 10.0);
+    float scrollSpeedValue = map(constrain(abs(angle), MIN_ANGLE, MAX_ANGLE), MIN_ANGLE, MAX_ANGLE, 1, scrollSpeedAdjusted);
+    unsigned long currentTime = millis();
+
+    if (currentTime - lastScrollTime > SCROLL_DELAY) {
+      Mouse.move(0, 0, scrollSpeedValue * direction * INVERT_SCROLL);
+      lastScrollTime = currentTime;
+    }
   }
 }
 
@@ -328,6 +376,64 @@ void handleEncoder() {
 
   lastVolumeStateA = aState;
   lastVolumeStateB = bState;
+}
+
+void handleSerialInput() {
+  if (Serial.available()) {
+    String command = Serial.readStringUntil('\n');
+    command.trim();
+    
+    bool settingsChanged = false;
+
+    if (command.startsWith("CURSOR_SPEED:")) {
+      cursorSpeed = command.substring(13).toInt();
+      cursorSpeed = constrain(cursorSpeed, 1, 10);
+      settingsChanged = true;
+    } 
+    else if (command.startsWith("SCROLL_SPEED:")) {
+      scrollSpeed = command.substring(13).toInt();
+      scrollSpeed = constrain(scrollSpeed, 1, 10);
+      settingsChanged = true;
+    }
+    else if (command.startsWith("BTN:")) {
+      command = command.substring(4);
+      int firstColon = command.indexOf(':');
+      int secondColon = command.indexOf(':', firstColon + 1);
+      
+      if (firstColon != -1 && secondColon != -1) {
+        int buttonPin = command.substring(0, firstColon).toInt();
+        String function = command.substring(firstColon + 1, secondColon);
+        
+        int buttonIndex = -1;
+        int pins[] = {pinLeftButton, pinRightButton, pinMiddleButton, 
+                 pinForwardButton, pinBackButton, pinCopyButton, pinPasteButton};
+        
+        for (int i = 0; i < 7; i++) {
+          if (pins[i] == buttonPin) {
+            buttonIndex = i;
+            break;
+          }
+        }
+        
+        if (buttonIndex != -1) {
+          buttonFunctions[buttonIndex] = function;
+          settingsChanged = true;
+          Serial.print("BTN_SET:");
+          Serial.print(buttonPin);
+          Serial.print(":");
+          Serial.println(function);
+        }
+      }
+    }
+    
+    if (settingsChanged) {
+      saveAllSettings();
+      Serial.println("Settings saved to EEPROM");
+    }
+  }
+}
+
+void debugOutput() {
 }
 
 void performButtonFunction(int buttonIndex) {
@@ -380,100 +486,4 @@ void releaseButtonFunction(int buttonIndex) {
   } else if (function == "Shift") {
     Keyboard.release(KEY_LEFT_SHIFT);
   }
-}
-
-
-void handleSerialInput() {
-  if (Serial.available()) {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
-    
-    Serial.print("CMD_RECEIVED:");
-    Serial.println(command);
-
-    if (command.startsWith("BTN:")) {
-      command = command.substring(4);
-      int firstColon = command.indexOf(':');
-      int secondColon = command.indexOf(':', firstColon + 1);
-      
-      if (firstColon != -1 && secondColon != -1) {
-        int buttonPin = command.substring(0, firstColon).toInt();
-        String function = command.substring(firstColon + 1, secondColon);
-        String hotkey = command.substring(secondColon + 1);
-        
-        int buttonIndex = -1;
-        int pins[] = {pinLeftButton, pinRightButton, pinMiddleButton, 
-                     pinForwardButton, pinBackButton, pinCopyButton, pinPasteButton};
-        
-        for (int i = 0; i < 7; i++) {
-          if (pins[i] == buttonPin) {
-            buttonIndex = i;
-            break;
-          }
-        }
-        
-        if (buttonIndex != -1) {
-          buttonFunctions[buttonIndex] = function;
-          Serial.print("BTN_SET:");
-          Serial.print(buttonPin);
-          Serial.print(":");
-          Serial.println(function);
-        } else {
-          Serial.print("BTN_ERROR:");
-          Serial.println(buttonPin);
-        }
-      }
-    } 
-    else if (command.startsWith("DEAD_ZONE:")) {
-      int value = command.substring(10).toInt();
-      if (value >= 0 && value <= 500) { 
-        Serial.print("DEAD_ZONE_SET:");
-        Serial.println(value);
-      } else {
-        Serial.println("DEAD_ZONE_ERROR:Invalid value");
-      }
-    }
-    else if (command.startsWith("CURSOR_SPEED:")) {
-      cursorSpeed = command.substring(13).toInt();
-      cursorSpeed = constrain(cursorSpeed, 1, 10);
-      Serial.print("CURSOR_SPEED_SET:");
-      Serial.println(cursorSpeed);
-    }
-    else if (command.startsWith("SCROLL_SPEED:")) {
-      scrollSpeed = command.substring(13).toInt();
-      scrollSpeed = constrain(scrollSpeed, 1, 10);
-      Serial.print("SCROLL_SPEED_SET:");
-      Serial.println(scrollSpeed);
-    }
-    else if (command.startsWith("GET_STATUS")) {
-      sendStatus();
-    }
-    else {
-      Serial.println("ERROR:Unknown command");
-    }
-  }
-}
-
-void sendStatus() {
-  Serial.println("STATUS_BEGIN");
-  
-  for (int i = 0; i < 7; i++) {
-    Serial.print("BTN_STATUS:");
-    Serial.print(i);
-    Serial.print(":");
-    Serial.println(buttonFunctions[i]);
-  }
-  
-  Serial.print("DEAD_ZONE_STATUS:");
-  Serial.println(DEAD_ZONE);
-  
-  Serial.print("MPU1_STATUS:");
-  Serial.println(mpu1.testConnection() ? "OK" : "ERROR");
-  Serial.print("MPU2_STATUS:");
-  Serial.println(mpu2.testConnection() ? "OK" : "ERROR");
-  
-  Serial.println("STATUS_END");
-}
-
-void debugOutput() {
 }
