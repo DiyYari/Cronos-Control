@@ -1,0 +1,210 @@
+namespace ArduinoButtonManagerUI
+{
+    partial class Form1
+    {
+        private System.ComponentModel.IContainer components = null;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && (components != null))
+            {
+                components.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        #region Windows Form Designer generated code
+
+        private void InitializeComponent()
+        {
+            this.components = new System.ComponentModel.Container();
+            this.comboBoxPorts = new System.Windows.Forms.ComboBox();
+            this.comboBoxFunctions = new System.Windows.Forms.ComboBox();
+            this.btnSendCommand = new System.Windows.Forms.Button();
+            this.comboBox1 = new System.Windows.Forms.ComboBox();
+            this.comboBox2 = new System.Windows.Forms.ComboBox();
+            this.comboBox3 = new System.Windows.Forms.ComboBox();
+            this.comboBox4 = new System.Windows.Forms.ComboBox();
+            this.comboBox5 = new System.Windows.Forms.ComboBox();
+            this.comboBox6 = new System.Windows.Forms.ComboBox();
+            this.btnReset = new System.Windows.Forms.Button();
+            this.pictureBox1 = new System.Windows.Forms.PictureBox();
+            this.textBoxLog = new System.Windows.Forms.TextBox();
+            this.trackBarCursorSpeed = new System.Windows.Forms.TrackBar();
+            this.trackBarScrollSpeed = new System.Windows.Forms.TrackBar();
+            this.contextMenuStrip1 = new System.Windows.Forms.ContextMenuStrip(this.components);
+            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.trackBarCursorSpeed)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.trackBarScrollSpeed)).BeginInit();
+            this.SuspendLayout();
+            // 
+            // comboBoxPorts
+            // 
+            this.comboBoxPorts.Location = new System.Drawing.Point(574, 480);
+            this.comboBoxPorts.Name = "comboBoxPorts";
+            this.comboBoxPorts.Size = new System.Drawing.Size(121, 21);
+            this.comboBoxPorts.TabIndex = 30;
+            // 
+            // comboBoxFunctions
+            // 
+            this.comboBoxFunctions.Location = new System.Drawing.Point(154, 267);
+            this.comboBoxFunctions.Name = "comboBoxFunctions";
+            this.comboBoxFunctions.Size = new System.Drawing.Size(121, 21);
+            this.comboBoxFunctions.TabIndex = 29;
+            // 
+            // btnSendCommand
+            // 
+            this.btnSendCommand.Location = new System.Drawing.Point(701, 480);
+            this.btnSendCommand.Name = "btnSendCommand";
+            this.btnSendCommand.Size = new System.Drawing.Size(75, 23);
+            this.btnSendCommand.TabIndex = 28;
+            this.btnSendCommand.Text = "Apply";
+            this.btnSendCommand.UseVisualStyleBackColor = true;
+            this.btnSendCommand.Click += new System.EventHandler(this.btnSendCommand_Click);
+            // 
+            // comboBox1
+            // 
+            this.comboBox1.Location = new System.Drawing.Point(604, 369);
+            this.comboBox1.Name = "comboBox1";
+            this.comboBox1.Size = new System.Drawing.Size(121, 21);
+            this.comboBox1.TabIndex = 27;
+            // 
+            // comboBox2
+            // 
+            this.comboBox2.Location = new System.Drawing.Point(118, 383);
+            this.comboBox2.Name = "comboBox2";
+            this.comboBox2.Size = new System.Drawing.Size(121, 21);
+            this.comboBox2.TabIndex = 26;
+            // 
+            // comboBox3
+            // 
+            this.comboBox3.Location = new System.Drawing.Point(644, 308);
+            this.comboBox3.Name = "comboBox3";
+            this.comboBox3.Size = new System.Drawing.Size(121, 21);
+            this.comboBox3.TabIndex = 25;
+            // 
+            // comboBox4
+            // 
+            this.comboBox4.Location = new System.Drawing.Point(219, 214);
+            this.comboBox4.Name = "comboBox4";
+            this.comboBox4.Size = new System.Drawing.Size(121, 21);
+            this.comboBox4.TabIndex = 24;
+            // 
+            // comboBox5
+            // 
+            this.comboBox5.Location = new System.Drawing.Point(352, 66);
+            this.comboBox5.Name = "comboBox5";
+            this.comboBox5.Size = new System.Drawing.Size(121, 21);
+            this.comboBox5.TabIndex = 23;
+            // 
+            // comboBox6
+            // 
+            this.comboBox6.Location = new System.Drawing.Point(507, 83);
+            this.comboBox6.Name = "comboBox6";
+            this.comboBox6.Size = new System.Drawing.Size(121, 21);
+            this.comboBox6.TabIndex = 22;
+            // 
+            // btnReset
+            // 
+            this.btnReset.Location = new System.Drawing.Point(653, 524);
+            this.btnReset.Name = "btnReset";
+            this.btnReset.Size = new System.Drawing.Size(75, 23);
+            this.btnReset.TabIndex = 32;
+            this.btnReset.Text = "Reset";
+            this.btnReset.UseVisualStyleBackColor = true;
+            this.btnReset.Click += new System.EventHandler(this.btnReset_Click);
+            // 
+            // pictureBox1
+            // 
+            this.pictureBox1.Image = global::Test.Properties.Resources.proga;
+            this.pictureBox1.InitialImage = null;
+            this.pictureBox1.Location = new System.Drawing.Point(-7, -1);
+            this.pictureBox1.Name = "pictureBox1";
+            this.pictureBox1.Size = new System.Drawing.Size(897, 634);
+            this.pictureBox1.TabIndex = 31;
+            this.pictureBox1.TabStop = false;
+            // 
+            // textBoxLog
+            // 
+            this.textBoxLog.Location = new System.Drawing.Point(12, 470);
+            this.textBoxLog.Multiline = true;
+            this.textBoxLog.Name = "textBoxLog";
+            this.textBoxLog.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
+            this.textBoxLog.Size = new System.Drawing.Size(360, 100);
+            this.textBoxLog.TabIndex = 33;
+            this.textBoxLog.TextChanged += new System.EventHandler(this.textBoxLog_TextChanged_1);
+            // 
+            // trackBarCursorSpeed
+            // 
+            this.trackBarCursorSpeed.Location = new System.Drawing.Point(672, 214);
+            this.trackBarCursorSpeed.Minimum = 1;
+            this.trackBarCursorSpeed.Name = "trackBarCursorSpeed";
+            this.trackBarCursorSpeed.Size = new System.Drawing.Size(200, 45);
+            this.trackBarCursorSpeed.TabIndex = 34;
+            this.trackBarCursorSpeed.Value = 5;
+            this.trackBarCursorSpeed.Scroll += new System.EventHandler(this.TrackBarCursorSpeed_Scroll);
+            // 
+            // trackBarScrollSpeed
+            // 
+            this.trackBarScrollSpeed.Location = new System.Drawing.Point(154, 137);
+            this.trackBarScrollSpeed.Minimum = 1;
+            this.trackBarScrollSpeed.Name = "trackBarScrollSpeed";
+            this.trackBarScrollSpeed.Size = new System.Drawing.Size(200, 45);
+            this.trackBarScrollSpeed.TabIndex = 35;
+            this.trackBarScrollSpeed.Value = 5;
+            this.trackBarScrollSpeed.Scroll += new System.EventHandler(this.TrackBarScrollSpeed_Scroll);
+            // 
+            // contextMenuStrip1
+            // 
+            this.contextMenuStrip1.Name = "contextMenuStrip1";
+            this.contextMenuStrip1.Size = new System.Drawing.Size(61, 4);
+            // 
+            // Form1
+            // 
+            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.ClientSize = new System.Drawing.Size(884, 598);
+            this.Controls.Add(this.trackBarScrollSpeed);
+            this.Controls.Add(this.trackBarCursorSpeed);
+            this.Controls.Add(this.textBoxLog);
+            this.Controls.Add(this.btnReset);
+            this.Controls.Add(this.comboBox6);
+            this.Controls.Add(this.comboBox5);
+            this.Controls.Add(this.comboBox4);
+            this.Controls.Add(this.comboBox3);
+            this.Controls.Add(this.comboBox2);
+            this.Controls.Add(this.comboBox1);
+            this.Controls.Add(this.btnSendCommand);
+            this.Controls.Add(this.comboBoxFunctions);
+            this.Controls.Add(this.comboBoxPorts);
+            this.Controls.Add(this.pictureBox1);
+            this.Name = "Form1";
+            this.Text = "Cronos Control";
+            this.Load += new System.EventHandler(this.Form1_Load);
+            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.trackBarCursorSpeed)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.trackBarScrollSpeed)).EndInit();
+            this.ResumeLayout(false);
+            this.PerformLayout();
+
+        }
+
+        #endregion
+
+        private System.Windows.Forms.ComboBox comboBoxPorts;
+        private System.Windows.Forms.ComboBox comboBoxFunctions;
+        private System.Windows.Forms.Button btnSendCommand;
+        private System.Windows.Forms.ComboBox comboBox1;
+        private System.Windows.Forms.ComboBox comboBox2;
+        private System.Windows.Forms.ComboBox comboBox3;
+        private System.Windows.Forms.ComboBox comboBox4;
+        private System.Windows.Forms.ComboBox comboBox5;
+        private System.Windows.Forms.ComboBox comboBox6;
+        private System.Windows.Forms.PictureBox pictureBox1;
+        private System.Windows.Forms.Button btnReset;
+        private System.Windows.Forms.TextBox textBoxLog;
+        private System.Windows.Forms.TrackBar trackBarCursorSpeed;
+        private System.Windows.Forms.TrackBar trackBarScrollSpeed;
+        private System.Windows.Forms.ContextMenuStrip contextMenuStrip1;
+    }
+}

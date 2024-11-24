@@ -1,0 +1,305 @@
+using System;
+using System.IO.Ports;
+using System.Windows.Forms;
+
+namespace ArduinoButtonManagerUI
+{
+    public partial class Form1 : Form
+    {
+        private SerialPort _serialPort;
+        private ComboBox[] buttonFunctionBoxes;
+        private bool isConnected = false;
+        private string[] defaultFunctions = new string[]
+        {
+            "LeftClick",
+            "RightClick",
+            "MiddleClick",
+            "Forward",
+            "Back",
+            "Copy",
+            "Paste"
+        };
+
+        public Form1()
+        {
+            InitializeComponent();
+            InitializeButtonControls();
+            LoadComPorts();
+            LoadButtonFunctions();
+            InitializeSpeedControls();
+            InitializeLogTextBox();
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            DisconnectPort();
+            base.OnFormClosing(e);
+        }
+
+        private void InitializeButtonControls()
+        {
+            buttonFunctionBoxes = new ComboBox[]
+            {
+                comboBoxFunctions,
+                comboBox1,
+                comboBox2,
+                comboBox3,
+                comboBox4,
+                comboBox5,
+                comboBox6
+            };
+
+            string[] buttonLabels = new string[]
+            {
+                "Left Button (Pin 9)",
+                "Right Button (Pin 8)",
+                "Middle Button (Pin 18)",
+                "Forward Button (Pin 7)",
+                "Back Button (Pin 6)",
+                "Copy Button (Pin 4)",
+                "Paste Button (Pin 5)"
+            };
+
+            for (int i = 0; i < buttonFunctionBoxes.Length; i++)
+            {
+                Label buttonLabel = new Label();
+                buttonLabel.Text = buttonLabels[i];
+                buttonLabel.Location = new System.Drawing.Point(
+                    buttonFunctionBoxes[i].Location.X,
+                    buttonFunctionBoxes[i].Location.Y - 20);
+                buttonLabel.AutoSize = true;
+                this.Controls.Add(buttonLabel);
+            }
+        }
+
+        private void InitializeSpeedControls()
+        {
+            Label cursorSpeedLabel = new Label();
+            cursorSpeedLabel.Text = "Cursor Speed:";
+            cursorSpeedLabel.Location = new System.Drawing.Point(20, 400);
+            cursorSpeedLabel.AutoSize = true;
+            this.Controls.Add(cursorSpeedLabel);
+
+            TrackBar trackBarCursorSpeed = new TrackBar();
+            trackBarCursorSpeed.Minimum = 1;
+            trackBarCursorSpeed.Maximum = 10;
+            trackBarCursorSpeed.Value = 5;
+            trackBarCursorSpeed.Location = new System.Drawing.Point(100, 395);
+            trackBarCursorSpeed.Size = new System.Drawing.Size(200, 45);
+            trackBarCursorSpeed.Scroll += TrackBarCursorSpeed_Scroll;
+            this.Controls.Add(trackBarCursorSpeed);
+
+            Label scrollSpeedLabel = new Label();
+            scrollSpeedLabel.Text = "Scroll Speed:";
+            scrollSpeedLabel.Location = new System.Drawing.Point(20, 450);
+            scrollSpeedLabel.AutoSize = true;
+            this.Controls.Add(scrollSpeedLabel);
+
+            TrackBar trackBarScrollSpeed = new TrackBar();
+            trackBarScrollSpeed.Minimum = 1;
+            trackBarScrollSpeed.Maximum = 10;
+            trackBarScrollSpeed.Value = 5;
+            trackBarScrollSpeed.Location = new System.Drawing.Point(100, 445);
+            trackBarScrollSpeed.Size = new System.Drawing.Size(200, 45);
+            trackBarScrollSpeed.Scroll += TrackBarScrollSpeed_Scroll;
+            this.Controls.Add(trackBarScrollSpeed);
+        }
+
+        private void InitializeLogTextBox()
+        {
+            Label logLabel = new Label();
+            logLabel.Text = "Log:";
+            logLabel.Location = new System.Drawing.Point(20, 500);
+            logLabel.AutoSize = true;
+            this.Controls.Add(logLabel);
+
+            TextBox textBoxLog = new TextBox();
+            textBoxLog.Name = "textBoxLog";
+            textBoxLog.Location = new System.Drawing.Point(20, 520);
+            textBoxLog.Size = new System.Drawing.Size(360, 100);
+            textBoxLog.Multiline = true;
+            textBoxLog.ScrollBars = ScrollBars.Vertical;
+            this.Controls.Add(textBoxLog);
+        }
+
+        private void TrackBarCursorSpeed_Scroll(object sender, EventArgs e)
+        {
+            TrackBar trackBar = sender as TrackBar;
+            if (trackBar != null)
+            {
+                int cursorSpeed = trackBar.Value;
+                _serialPort?.WriteLine($"CURSOR_SPEED:{cursorSpeed}");
+                LogMessage($"Cursor speed set to {cursorSpeed}");
+            }
+        }
+
+        private void TrackBarScrollSpeed_Scroll(object sender, EventArgs e)
+        {
+            TrackBar trackBar = sender as TrackBar;
+            if (trackBar != null)
+            {
+                int scrollSpeed = trackBar.Value;
+                _serialPort?.WriteLine($"SCROLL_SPEED:{scrollSpeed}");
+                LogMessage($"Scroll speed set to {scrollSpeed}");
+            }
+        }
+
+        private void LoadComPorts()
+        {
+            string[] ports = SerialPort.GetPortNames();
+            comboBoxPorts.Items.AddRange(ports);
+            if (comboBoxPorts.Items.Count > 0)
+            {
+                comboBoxPorts.SelectedIndex = 0;
+                LogMessage("COM ports loaded.");
+            }
+            else
+            {
+                MessageBox.Show("No COM ports found. Please check device connection.");
+                LogMessage("No COM ports found.");
+            }
+        }
+
+        private void LoadButtonFunctions()
+        {
+            string[] functions = new string[] { "LeftClick", "RightClick", "MiddleClick", "Forward", "Back", "Copy", "Paste", "Ctrl", "Shift", "Alt" };
+
+            for (int i = 0; i < buttonFunctionBoxes.Length; i++)
+            {
+                buttonFunctionBoxes[i].Items.Clear();
+                buttonFunctionBoxes[i].Items.AddRange(functions);
+                buttonFunctionBoxes[i].SelectedItem = defaultFunctions[i];
+            }
+            LogMessage("Button functions loaded.");
+        }
+
+        private void ConnectPort()
+        {
+            try
+            {
+                if (!isConnected)
+                {
+                    string selectedPort = comboBoxPorts.SelectedItem.ToString();
+                    _serialPort = new SerialPort(selectedPort, 115200);
+                    _serialPort.DataReceived += SerialPort_DataReceived;
+                    _serialPort.Open();
+                    isConnected = true;
+                    LogMessage($"Connected to port {selectedPort}");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Connection error: {ex.Message}");
+                LogMessage($"Connection error: {ex.Message}");
+                isConnected = false;
+            }
+        }
+
+        private void DisconnectPort()
+        {
+            if (_serialPort != null && _serialPort.IsOpen)
+            {
+                _serialPort.Close();
+                _serialPort.Dispose();
+            }
+            isConnected = false;
+            LogMessage("Disconnected from port.");
+        }
+
+        private void btnSendCommand_Click(object sender, EventArgs e)
+        {
+            DisconnectPort();
+            ConnectPort();
+            if (isConnected)
+            {
+                SendAllSettings();
+                MessageBox.Show("Settings successfully applied!");
+            }
+        }
+
+        private void SendAllSettings()
+        {
+            if (!isConnected) return;
+
+            try
+            {
+                int[] pinMapping = new int[] { 9, 8, 18, 7, 6, 4, 5 };
+
+                // Reset all settings
+                _serialPort.WriteLine("RESET:ALL");
+                LogMessage("Reset command sent.");
+                System.Threading.Thread.Sleep(100);
+
+                // Configure buttons
+                for (int i = 0; i < buttonFunctionBoxes.Length; i++)
+                {
+                    string selectedFunction = buttonFunctionBoxes[i].SelectedItem.ToString();
+                    string command = $"BTN:{pinMapping[i]}:{selectedFunction}:key";
+                    _serialPort.WriteLine(command);
+                    LogMessage($"Command sent for button {pinMapping[i]}: {selectedFunction}");
+                    System.Threading.Thread.Sleep(100);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error sending settings: {ex.Message}");
+                LogMessage($"Error sending settings: {ex.Message}");
+                DisconnectPort();
+            }
+        }
+
+        private void SerialPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
+        {
+            try
+            {
+                string response = _serialPort.ReadLine();
+                if (response.StartsWith("OK"))
+                {
+                    LogMessage("Settings confirmed by device.");
+                }
+                else
+                {
+                    LogMessage($"Error: {response}");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"Error receiving data: {ex.Message}");
+            }
+        }
+
+        private void btnReset_Click(object sender, EventArgs e)
+        {
+            for (int i = 0; i < buttonFunctionBoxes.Length; i++)
+            {
+                buttonFunctionBoxes[i].SelectedItem = defaultFunctions[i];
+            }
+            LogMessage("Settings reset to default values.");
+        }
+
+        private void LogMessage(string message)
+        {
+            TextBox textBoxLog = this.Controls.Find("textBoxLog", true)[0] as TextBox;
+            if (textBoxLog != null)
+            {
+                textBoxLog.AppendText($"{DateTime.Now}: {message}\n");
+                textBoxLog.ScrollToCaret();
+            }
+        }
+
+        private void textBoxLog_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+
+        }
+
+        private void textBoxLog_TextChanged_1(object sender, EventArgs e)
+        {
+
+        }
+    }
+}
