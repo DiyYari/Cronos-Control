@@ -13,7 +13,7 @@ MPU6050 mpu2(0x69);
 #define SCROLL_DELAY 100     
 #define SMOOTHING_FACTOR 10 
 #define SCROLL_DEADZONE 20   
-#define INVERT_SCROLL -1     
+#define INVERT_SCROLL 1     
 
 #define MAX_SCROLL_SPEED 5
 #define MIN_ANGLE 4         
