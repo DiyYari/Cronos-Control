@@ -11,12 +11,12 @@ MPU6050 mpu2(0x69);
 #define MAX_SPEED 300        
 #define THRESHOLD 10         
 #define DEAD_ZONE 350        
-#define SCROLL_DELAY 100     
-#define SCROLL_DEADZONE 20   
+#define SCROLL_DELAY 200     
+#define SCROLL_DEADZONE 7   
 #define INVERT_SCROLL 1      
 #define PRECISION_FACTOR 0.5  
 
-#define MAX_SCROLL_SPEED 5
+#define MAX_SCROLL_SPEED 7
 #define MIN_ANGLE 4         
 #define MAX_ANGLE 15         
 
@@ -46,7 +46,7 @@ EncoderMode currentEncoderMode = VOLUME_CONTROL;
 float scrollAngleHistory[SCROLL_SMOOTHING_SAMPLES] = {0};
 int scrollSmoothingIndex = 0;
 int scrollStableCount = 0;
-const int stableThreshold = 10;
+const int stableThreshold = 20;
 int SENSITIVITY = 100;
 
 int invertX = -1;
@@ -331,29 +331,41 @@ void handleButtons() {
 }
 
 void handleScroll() {
-  int16_t ax2, ay2, az2;
-  mpu2.getAcceleration(&ax2, &ay2, &az2);
+    int16_t ax2, ay2, az2;
+    mpu2.getAcceleration(&ax2, &ay2, &az2);
 
-  ax2 -= offset_ax2;
-  ay2 -= offset_ay2;
-  az2 -= offset_az2;
+    // Убираем смещения
+    ax2 -= offset_ax2;
+    ay2 -= offset_ay2;
+    az2 -= offset_az2;
 
-  int16_t tilt = ay2;
-  float angle = (float)tilt / 16384.0 * 90.0;
-  angle = calculateSmoothedAngle(angle);
+    int16_t tilt = ay2;
+    float rawAngle = (float)tilt / 16384.0 * 90.0;
+    float smoothedAngle = calculateSmoothedAngle(rawAngle);
 
-  if (abs(angle) > MIN_ANGLE) {
-    int direction = (angle > 0) ? 1 : -1;
-    float scrollSpeedAdjusted = scrollSpeed * (MAX_SCROLL_SPEED / 10.0);
-    float clampedAngle = constrain(abs(angle), MIN_ANGLE, MAX_ANGLE);
-    float scrollSpeedValue = map(clampedAngle, MIN_ANGLE, MAX_ANGLE, 1, scrollSpeedAdjusted);
-    unsigned long currentTime = millis();
+    static float interpolatedAngle = 0.0;
+    float lerpFactor = 0.05;
+    interpolatedAngle += (smoothedAngle - interpolatedAngle) * lerpFactor;
 
-    if (currentTime - lastScrollTime > SCROLL_DELAY) {
-      Mouse.move(0, 0, scrollSpeedValue * direction * INVERT_SCROLL);
-      lastScrollTime = currentTime;
+    if (abs(interpolatedAngle) > MIN_ANGLE) {
+        int direction = (interpolatedAngle > 0) ? 1 : -1;
+        
+        // clampedAngle ограничивает угол для маппинга
+        float clampedAngle = constrain(abs(interpolatedAngle), MIN_ANGLE, MAX_ANGLE);
+        
+        // Задаем ускорение: при минимальном угле скролл = 1 шаг, при максимальном - scrollSpeed
+        float adjustedScrollSpeed = map(clampedAngle, MIN_ANGLE, MAX_ANGLE, 1, scrollSpeed);
+        int scrollAmount = max(1, (int)adjustedScrollSpeed);
+
+        unsigned long currentTime = millis();
+        if (currentTime - lastScrollTime > SCROLL_DELAY) {
+            // Отправляем направление скролла с рассчитанным количеством шагов
+            Mouse.move(0, 0, direction * scrollAmount * INVERT_SCROLL);
+            lastScrollTime = currentTime;
+        }
+    } else {
+        Mouse.move(0, 0, 0);
     }
-  }
 }
 
 void handleEncoder() {
