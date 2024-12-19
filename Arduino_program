@@ -32,7 +32,7 @@ MPU6050 mpu2(0x69);
 #define EEPROM_DEAD_ZONE 20        
 #define EEPROM_SENSITIVITY 21      
 
-int cursorSpeed = 3;  
+int cursorSpeed = 1;  
 int scrollSpeed = 3;  
 
 enum EncoderMode {
