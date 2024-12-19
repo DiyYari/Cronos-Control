@@ -16,7 +16,7 @@ MPU6050 mpu2(0x69);
 #define INVERT_SCROLL 1      
 #define PRECISION_FACTOR 0.5  
 
-#define MAX_SCROLL_SPEED 7
+#define MAX_SCROLL_SPEED 10
 #define MIN_ANGLE 4         
 #define MAX_ANGLE 15         
 
@@ -42,6 +42,10 @@ enum EncoderMode {
 };
 
 EncoderMode currentEncoderMode = VOLUME_CONTROL;
+
+float scrollAccumulator = 0.0;         // Накопитель дробных шагов скролла
+unsigned long lastScrollUpdate = 0;    // Время последнего обновления скролла
+
 
 float scrollAngleHistory[SCROLL_SMOOTHING_SAMPLES] = {0};
 int scrollSmoothingIndex = 0;
@@ -339,32 +343,49 @@ void handleScroll() {
     ay2 -= offset_ay2;
     az2 -= offset_az2;
 
+    // Вычисляем угол
     int16_t tilt = ay2;
     float rawAngle = (float)tilt / 16384.0 * 90.0;
+
+    // Сглаживаем угол
     float smoothedAngle = calculateSmoothedAngle(rawAngle);
 
+    // Более агрессивное сглаживание через интерполяцию
     static float interpolatedAngle = 0.0;
-    float lerpFactor = 0.05;
+    float lerpFactor = 0.3; // Чем выше, тем быстрее угол будет следовать за текущим значением
     interpolatedAngle += (smoothedAngle - interpolatedAngle) * lerpFactor;
 
-    if (abs(interpolatedAngle) > MIN_ANGLE) {
+    // Рассчитываем скорость исходя из угла
+    float angleAbs = fabs(interpolatedAngle);
+    if (angleAbs > MIN_ANGLE) {
         int direction = (interpolatedAngle > 0) ? 1 : -1;
-        
-        // clampedAngle ограничивает угол для маппинга
-        float clampedAngle = constrain(abs(interpolatedAngle), MIN_ANGLE, MAX_ANGLE);
-        
-        // Задаем ускорение: при минимальном угле скролл = 1 шаг, при максимальном - scrollSpeed
-        float adjustedScrollSpeed = map(clampedAngle, MIN_ANGLE, MAX_ANGLE, 1, scrollSpeed);
-        int scrollAmount = max(1, (int)adjustedScrollSpeed);
 
-        unsigned long currentTime = millis();
-        if (currentTime - lastScrollTime > SCROLL_DELAY) {
-            // Отправляем направление скролла с рассчитанным количеством шагов
-            Mouse.move(0, 0, direction * scrollAmount * INVERT_SCROLL);
-            lastScrollTime = currentTime;
-        }
+        // Нормализуем угол от MIN_ANGLE до MAX_ANGLE в диапазон [0..1]
+        float normalizedAngle = (angleAbs - MIN_ANGLE) / (float)(MAX_ANGLE - MIN_ANGLE);
+        if (normalizedAngle < 0) normalizedAngle = 0;
+        if (normalizedAngle > 1) normalizedAngle = 1;
+
+        // Квадратичная зависимость скорости: при малом угле скорость ~1,
+        // при максимальном угле скорость ~scrollSpeed (или даже немного больше, если хотите)
+        float baseSpeed = 0.03 + (scrollSpeed - 0.03) * (normalizedAngle * normalizedAngle);
+
+        // Добавляем инкремент к аккумулятору. Можно увеличить множитель для усиления эффекта
+        scrollAccumulator += baseSpeed * direction * INVERT_SCROLL * 0.2; 
+        // Если при этом скорость все еще мала, увеличьте 0.2 до 0.5 или 1.0
     } else {
-        Mouse.move(0, 0, 0);
+        // При отсутствии достаточного наклона плавно снижаем скорость
+        scrollAccumulator *= 0.95;
+        // Если накопитель очень мал, обнулим, чтобы исключить дрожание
+        if (fabs(scrollAccumulator) < 0.001) {
+            scrollAccumulator = 0.0;
+        }
+    }
+
+    // Теперь отправляем скролл, когда накопилось достаточно для шага
+    int steps = (int)floor(scrollAccumulator);
+    if (steps != 0) {
+        Mouse.move(0, 0, steps);
+        scrollAccumulator -= steps;
     }
 }
 
