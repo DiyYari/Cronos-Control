@@ -1,0 +1,15 @@
+C:\Users\Yarik\source\repos\Test\Test\bin\Release\Test.exe.config
+C:\Users\Yarik\source\repos\Test\Test\bin\Release\Test.exe
+C:\Users\Yarik\source\repos\Test\Test\bin\Release\Test.pdb
+C:\Users\Yarik\source\repos\Test\Test\bin\Release\Newtonsoft.Json.dll
+C:\Users\Yarik\source\repos\Test\Test\bin\Release\System.IO.Ports.dll
+C:\Users\Yarik\source\repos\Test\Test\bin\Release\Newtonsoft.Json.xml
+C:\Users\Yarik\source\repos\Test\Test\bin\Release\System.IO.Ports.xml
+C:\Users\Yarik\source\repos\Test\Test\obj\Release\Cronos-Control.csproj.AssemblyReference.cache
+C:\Users\Yarik\source\repos\Test\Test\obj\Release\ArduinoButtonManagerUI.Form1.resources
+C:\Users\Yarik\source\repos\Test\Test\obj\Release\Test.Properties.Resources.resources
+C:\Users\Yarik\source\repos\Test\Test\obj\Release\Cronos-Control.csproj.GenerateResource.cache
+C:\Users\Yarik\source\repos\Test\Test\obj\Release\Cronos-Control.csproj.CoreCompileInputs.cache
+C:\Users\Yarik\source\repos\Test\Test\obj\Release\Cronos-C.D0E45E2E.Up2Date
+C:\Users\Yarik\source\repos\Test\Test\obj\Release\Test.exe
+C:\Users\Yarik\source\repos\Test\Test\obj\Release\Test.pdb
