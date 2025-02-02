@@ -4,36 +4,44 @@
 #include <MPU6050.h>
 #include <HID-Project.h>
 
-MPU6050 mpu1;
+// ------------------------------------------------------------------------------------
+// TWO MPUs (accelerometers)
+// ------------------------------------------------------------------------------------
+MPU6050 mpu1(0x68);
 MPU6050 mpu2(0x69);
 
-// Настройки
-#define MAX_SPEED 300        
-#define THRESHOLD 10         
-#define DEAD_ZONE 350        
-#define SCROLL_DELAY 200     
-#define SCROLL_DEADZONE 7   
-#define INVERT_SCROLL 1      
-#define PRECISION_FACTOR 0.5  
+// ------------------------------------------------------------------------------------
+// CONSTANTS AND PARAMETERS
+// ------------------------------------------------------------------------------------
+#define MAX_SPEED              300
+#define THRESHOLD              10
+#define DEAD_ZONE              350
+#define SCROLL_DELAY           200
+#define SCROLL_DEADZONE        7
+#define INVERT_SCROLL          1
+#define PRECISION_FACTOR       0.5
 
-#define MAX_SCROLL_SPEED 10
-#define MIN_ANGLE 4         
-#define MAX_ANGLE 15         
+#define MAX_SCROLL_SPEED       10
+#define MIN_ANGLE              4
+#define MAX_ANGLE              15
 
-#define MIN_SPEED 1          
-#define EXPONENTIAL_FACTOR 1  
-#define SMOOTHING_SAMPLES 10   
-#define SCROLL_SMOOTHING_SAMPLES 10   
+#define MIN_SPEED              1
+#define EXPONENTIAL_FACTOR     1
+#define SMOOTHING_SAMPLES      10
+#define SCROLL_SMOOTHING_SAMPLES 10
 
-#define EEPROM_INITIALIZED_FLAG 0    
-#define EEPROM_CURSOR_SPEED 1        
-#define EEPROM_SCROLL_SPEED 2        
-#define EEPROM_BUTTON_FUNCTIONS 3   
-#define EEPROM_DEAD_ZONE 20        
-#define EEPROM_SENSITIVITY 21      
+// ------------------------------------------------------------------------------------
+// EEPROM Addresses
+// ------------------------------------------------------------------------------------
+#define EEPROM_INITIALIZED_FLAG  0
+#define EEPROM_CURSOR_SPEED      1
+#define EEPROM_SCROLL_SPEED      2
+#define EEPROM_BUTTON_FUNCTIONS  3
+#define EEPROM_DEAD_ZONE         20
+#define EEPROM_SENSITIVITY       21
 
-int cursorSpeed = 1;  
-int scrollSpeed = 3;  
+int cursorSpeed = 1;
+int scrollSpeed = 3;
 
 enum EncoderMode {
   VOLUME_CONTROL,
@@ -43,154 +51,155 @@ enum EncoderMode {
 
 EncoderMode currentEncoderMode = VOLUME_CONTROL;
 
-float scrollAccumulator = 0.0;         // Накопитель дробных шагов скролла
-unsigned long lastScrollUpdate = 0;    // Время последнего обновления скролла
+float scrollAccumulator = 0.0;
+unsigned long lastScrollUpdate = 0;
 
-
-float scrollAngleHistory[SCROLL_SMOOTHING_SAMPLES] = {0};
-int scrollSmoothingIndex = 0;
-int scrollStableCount = 0;
-const int stableThreshold = 20;
 int SENSITIVITY = 100;
-
 int invertX = -1;
 int invertY = 1;
 
+// Calibration offsets for two MPUs
 int16_t offset_ax1 = 0, offset_ay1 = 0, offset_az1 = 0;
 int16_t offset_ax2 = 0, offset_ay2 = 0, offset_az2 = 0;
 
-const int pinLeftButton = 9;
-const int pinRightButton = 8;
-const int pinMiddleButton = 18;
+// ------------------------------------------------------------------------------------
+// BUTTON PINS
+// ------------------------------------------------------------------------------------
+const int pinLeftButton    = 9;
+const int pinRightButton   = 8;
+const int pinMiddleButton  = 18;
 const int pinForwardButton = 7;
-const int pinBackButton = 6;
-const int pinCopyButton = 4;
-const int pinPasteButton = 5;
+const int pinBackButton    = 6;
+const int pinCopyButton    = 4;
+const int pinPasteButton   = 5;
 
+// Encoder pins
 const int pinVolumeEncoderA = 10;
 const int pinVolumeEncoderB = 16;
 
 int lastVolumeStateA = HIGH;
 int lastVolumeStateB = HIGH;
-int currentVolumeState = 0;
-int lastVolumeState = 0;
-int volumePosition = 0;
+int volumePosition   = 0;
 
 unsigned long lastScrollTime = 0;
-unsigned long lastDebugTime = 0;
+unsigned long lastDebugTime  = 0;
 const unsigned long DEBUG_INTERVAL = 1000;
 
-bool buttonStates[7] = {false, false, false, false, false, false, false};
-bool buttonPressed[7] = {false, false, false, false, false, false, false};
+// ------------------------------------------------------------------------------------
+// Button states structure
+// ------------------------------------------------------------------------------------
+bool buttonStates[7]     = {false, false, false, false, false, false, false};
+bool buttonPressed[7]    = {false, false, false, false, false, false, false};
 unsigned long lastDebounceTime[7] = {0, 0, 0, 0, 0, 0, 0};
 const unsigned long debounceDelay = 50;
 
-String buttonFunctions[7] = {"LeftClick", "RightClick", "MiddleClick", "Forward", "Back", "Copy", "Paste"};
-
-int16_t smoothedAx[SMOOTHING_SAMPLES] = {0};
-int16_t smoothedAy[SMOOTHING_SAMPLES] = {0};
-int smoothingIndex = 0;
-
-const int FILTER_WINDOW = 10;
-float angleHistory[FILTER_WINDOW] = {0};
-int historyIndex = 0;
-
-int smallMovementCountX = 0;
-int smallMovementCountY = 0;
-const int smallMovementThreshold = 5;
-
-struct ButtonFunction {
-    char name[15];  
+// ------------------------------------------------------------------------------------
+// ARRAY OF FUNCTIONS FOR EACH BUTTON
+// ------------------------------------------------------------------------------------
+String buttonFunctions[7] = {
+  "LeftClick",
+  "RightClick",
+  "MiddleClick",
+  "Forward",
+  "Back",
+  "Copy",
+  "Paste"
 };
 
+// ------------------------------------------------------------------------------------
+// Structure for storing string function in EEPROM
+// ------------------------------------------------------------------------------------
+struct ButtonFunction {
+  char name[15];
+};
+
+// ------------------------------------------------------------------------------------
+// SAVE/LOAD FUNCTIONS (EEPROM)
+// ------------------------------------------------------------------------------------
 void saveButtonFunction(int buttonIndex, String function) {
-    int address = EEPROM_BUTTON_FUNCTIONS + (buttonIndex * sizeof(ButtonFunction));
-    ButtonFunction bf;
-    function.toCharArray(bf.name, sizeof(bf.name));
-    EEPROM.put(address, bf);
+  int address = EEPROM_BUTTON_FUNCTIONS + (buttonIndex * sizeof(ButtonFunction));
+  ButtonFunction bf;
+  function.toCharArray(bf.name, sizeof(bf.name));
+  EEPROM.put(address, bf);
 }
 
 String loadButtonFunction(int buttonIndex) {
-    int address = EEPROM_BUTTON_FUNCTIONS + (buttonIndex * sizeof(ButtonFunction));
-    ButtonFunction bf;
-    EEPROM.get(address, bf);
-    return String(bf.name);
+  int address = EEPROM_BUTTON_FUNCTIONS + (buttonIndex * sizeof(ButtonFunction));
+  ButtonFunction bf;
+  EEPROM.get(address, bf);
+  return String(bf.name);
 }
 
 void saveAllSettings() {
-    EEPROM.write(EEPROM_INITIALIZED_FLAG, 0xAA);
-    EEPROM.write(EEPROM_CURSOR_SPEED, cursorSpeed);
-    EEPROM.write(EEPROM_SCROLL_SPEED, scrollSpeed);
-    EEPROM.write(EEPROM_DEAD_ZONE, DEAD_ZONE);
-    EEPROM.write(EEPROM_SENSITIVITY, SENSITIVITY);
-    for (int i = 0; i < 7; i++) {
-        saveButtonFunction(i, buttonFunctions[i]);
-    }
-}
+  EEPROM.write(EEPROM_INITIALIZED_FLAG, 0xAA);
+  EEPROM.write(EEPROM_CURSOR_SPEED, cursorSpeed);
+  EEPROM.write(EEPROM_SCROLL_SPEED, scrollSpeed);
+  EEPROM.write(EEPROM_DEAD_ZONE, DEAD_ZONE);
+  EEPROM.write(EEPROM_SENSITIVITY, SENSITIVITY);
 
-void loadAllSettings() {
-    if (EEPROM.read(EEPROM_INITIALIZED_FLAG) != 0xAA) {
-        setDefaultSettings();
-        saveAllSettings();
-        return;
-    }
-    cursorSpeed = EEPROM.read(EEPROM_CURSOR_SPEED);
-    scrollSpeed = EEPROM.read(EEPROM_SCROLL_SPEED);
-    for (int i = 0; i < 7; i++) {
-        buttonFunctions[i] = loadButtonFunction(i);
-    }
+  for (int i = 0; i < 7; i++) {
+    saveButtonFunction(i, buttonFunctions[i]);
+  }
 }
 
 void setDefaultSettings() {
-    cursorSpeed = 5;
-    scrollSpeed = 5;
-    buttonFunctions[0] = "LeftClick";
-    buttonFunctions[1] = "RightClick";
-    buttonFunctions[2] = "MiddleClick";
-    buttonFunctions[3] = "Forward";
-    buttonFunctions[4] = "Back";
-    buttonFunctions[5] = "Copy";
-    buttonFunctions[6] = "Paste";
+  cursorSpeed = 5;
+  scrollSpeed = 5;
+  buttonFunctions[0] = "LeftClick";
+  buttonFunctions[1] = "RightClick";
+  buttonFunctions[2] = "MiddleClick";
+  buttonFunctions[3] = "Forward";
+  buttonFunctions[4] = "Back";
+  buttonFunctions[5] = "Copy";
+  buttonFunctions[6] = "Paste";
 }
 
-float calculateSmoothedAngle(float newAngle) {
-  angleHistory[historyIndex] = newAngle;
-  historyIndex = (historyIndex + 1) % FILTER_WINDOW;
-
-  float sum = 0;
-  for (int i = 0; i < FILTER_WINDOW; i++) {
-    sum += angleHistory[i];
+void loadAllSettings() {
+  if (EEPROM.read(EEPROM_INITIALIZED_FLAG) != 0xAA) {
+    setDefaultSettings();
+    saveAllSettings();
+    return;
   }
-  return sum / FILTER_WINDOW;
+
+  cursorSpeed = EEPROM.read(EEPROM_CURSOR_SPEED);
+  scrollSpeed = EEPROM.read(EEPROM_SCROLL_SPEED);
+
+  for (int i = 0; i < 7; i++) {
+    buttonFunctions[i] = loadButtonFunction(i);
+  }
 }
 
+// ------------------------------------------------------------------------------------
+// SETUP
+// ------------------------------------------------------------------------------------
 void setup() {
-    Wire.begin();
-    Mouse.begin();
-    Keyboard.begin();
-    Consumer.begin();  
-    Serial.begin(115200);
+  Wire.begin();
+  Mouse.begin();
+  Keyboard.begin();
+  Consumer.begin();
+  Serial.begin(115200);
 
-    mpu1.initialize();
-    mpu2.initialize();
-    if (!mpu1.testConnection() || !mpu2.testConnection()) {
-        while (1);
-    }
+  mpu1.initialize();
+  mpu2.initialize();
 
-    loadAllSettings();
+  // if (!mpu1.testConnection() || !mpu2.testConnection()) { while(1); }
 
-    pinMode(pinLeftButton, INPUT_PULLUP);
-    pinMode(pinRightButton, INPUT_PULLUP);
-    pinMode(pinMiddleButton, INPUT_PULLUP);
-    pinMode(pinForwardButton, INPUT_PULLUP);
-    pinMode(pinBackButton, INPUT_PULLUP);
-    pinMode(pinCopyButton, INPUT_PULLUP);
-    pinMode(pinPasteButton, INPUT_PULLUP);
+  delay(1000);
 
-    pinMode(pinVolumeEncoderA, INPUT_PULLUP);
-    pinMode(pinVolumeEncoderB, INPUT_PULLUP);
+  loadAllSettings();
 
-    calibrateSensors();
+  pinMode(pinLeftButton,    INPUT_PULLUP);
+  pinMode(pinRightButton,   INPUT_PULLUP);
+  pinMode(pinMiddleButton,  INPUT_PULLUP);
+  pinMode(pinForwardButton, INPUT_PULLUP);
+  pinMode(pinBackButton,    INPUT_PULLUP);
+  pinMode(pinCopyButton,    INPUT_PULLUP);
+  pinMode(pinPasteButton,   INPUT_PULLUP);
+
+  pinMode(pinVolumeEncoderA, INPUT_PULLUP);
+  pinMode(pinVolumeEncoderB, INPUT_PULLUP);
+
+  calibrateSensors();
 }
 
 void loop() {
@@ -203,6 +212,7 @@ void loop() {
     handleSerialInput();
   }
 
+  // Example of periodic debug output
   if (millis() - lastDebugTime > DEBUG_INTERVAL) {
     debugOutput();
     lastDebugTime = millis();
@@ -211,12 +221,16 @@ void loop() {
   delay(1);
 }
 
+// ------------------------------------------------------------------------------------
+// SENSOR CALIBRATION
+// ------------------------------------------------------------------------------------
 void calibrateSensors() {
   int16_t ax, ay, az;
   const int numReadings = 100;
   long sum_ax1 = 0, sum_ay1 = 0, sum_az1 = 0;
   long sum_ax2 = 0, sum_ay2 = 0, sum_az2 = 0;
 
+  // Calibration for MPU1
   for (int i = 0; i < numReadings; i++) {
     mpu1.getAcceleration(&ax, &ay, &az);
     sum_ax1 += ax;
@@ -228,6 +242,7 @@ void calibrateSensors() {
   offset_ay1 = sum_ay1 / numReadings;
   offset_az1 = sum_az1 / numReadings;
 
+  // Calibration for MPU2
   for (int i = 0; i < numReadings; i++) {
     mpu2.getAcceleration(&ax, &ay, &az);
     sum_ax2 += ax;
@@ -240,78 +255,71 @@ void calibrateSensors() {
   offset_az2 = sum_az2 / numReadings;
 }
 
+// ------------------------------------------------------------------------------------
+// MOUSE MOVEMENT PROCESSING
+// ------------------------------------------------------------------------------------
 void processMouseMovement() {
-    int16_t ax1, ay1, az1;
-    mpu1.getAcceleration(&ax1, &ay1, &az1);
+  int16_t ax1, ay1, az1;
+  mpu1.getAcceleration(&ax1, &ay1, &az1);
 
-    // Учитываем смещения
-    ax1 -= offset_ax1;
-    ay1 -= offset_ay1;
+  ax1 -= offset_ax1;
+  ay1 -= offset_ay1;
 
-    // Сглаживание по массиву
-    smoothedAx[smoothingIndex] = ay1;
-    smoothedAy[smoothingIndex] = -ax1;
-    smoothingIndex = (smoothingIndex + 1) % SMOOTHING_SAMPLES;
+  static float emaAx = 0.0;
+  static float emaAy = 0.0;
 
-    long sumAx = 0, sumAy = 0;
-    for (int i = 0; i < SMOOTHING_SAMPLES; i++) {
-      sumAx += smoothedAx[i];
-      sumAy += smoothedAy[i];
-    }
+  float alpha = 0.2;
+  emaAx = alpha * ay1  + (1 - alpha) * emaAx;
+  emaAy = alpha * (-ax1) + (1 - alpha) * emaAy;
 
-    float avgAx = (float)sumAx / SMOOTHING_SAMPLES;
-    float avgAy = (float)sumAy / SMOOTHING_SAMPLES;
+  float filteredAx = (abs(emaAx) < DEAD_ZONE) ? 0 : emaAx;
+  float filteredAy = (abs(emaAy) < DEAD_ZONE) ? 0 : emaAy;
 
-    // Применяем мертвую зону
-    if (abs(avgAx) < DEAD_ZONE) avgAx = 0;
-    if (abs(avgAy) < DEAD_ZONE) avgAy = 0;
+  int mouseX = calculateAdjustedSpeed(filteredAx) * invertX;
+  int mouseY = calculateAdjustedSpeed(filteredAy) * invertY;
 
-    int mouseX = calculateAdjustedSpeed(avgAx) * invertX;
-    int mouseY = calculateAdjustedSpeed(avgAy) * invertY;
+  // If you want precision mode when holding an additional button, you can do it here
+  // if (digitalRead(pinPrecisionMode) == LOW) {
+  //     mouseX *= PRECISION_FACTOR;
+  //     mouseY *= PRECISION_FACTOR;
+  // }
 
-    if (mouseX != 0 || mouseY != 0) {
-        Mouse.move(mouseX, mouseY, 0);
-    }
+  if (mouseX != 0 || mouseY != 0) {
+    Mouse.move(mouseX, mouseY, 0);
+  }
 }
 
 int calculateAdjustedSpeed(float accelValue) {
-    if (abs(accelValue) < THRESHOLD) {
-        return 0;
-    }
+  if (abs(accelValue) < THRESHOLD) {
+    return 0;
+  }
 
-    // Нормализация
-    float normalizedValue = (float)(abs(accelValue) - THRESHOLD) / (16384 - THRESHOLD);
+  float normalizedValue = (abs(accelValue) - THRESHOLD) / (16384.0 - THRESHOLD);
+  normalizedValue = constrain(normalizedValue, 0.0, 1.0);
 
-    // Базовая экспоненциальная скорость
-    float expValue = pow(normalizedValue, EXPONENTIAL_FACTOR);
+  // Small power function to accelerate at larger tilts
+  float scaling = (cursorSpeed / 10.0);
+  float factor  = scaling * pow(normalizedValue, 1.5);
 
-    int maxSpeedValue = (int)((cursorSpeed * (MAX_SPEED / 10.0)) / 2);
-    int speed = (int)(expValue * (maxSpeedValue - MIN_SPEED) + MIN_SPEED);
-    speed = constrain(speed, MIN_SPEED, MAX_SPEED);
+  int speed = 1 + (int)(factor * (MAX_SPEED - MIN_SPEED));
+  speed = constrain(speed, MIN_SPEED, MAX_SPEED);
 
-    // Кусочно-линейная корректировка для малых углов:
-    // Если угол очень мал (normalizedValue < 0.05), уменьшим скорость в 4 раза.
-    // Если normalizedValue > 0.2, оставим скорость как есть.
-    // Между 0.05 и 0.2 увеличиваем скорость линейно от 0.25 до 1.0
-    float scale;
-    if (normalizedValue < 0.05) {
-      scale = 0.25; // в 4 раза медленнее
-    } else if (normalizedValue > 0.2) {
-      scale = 1.0; // нормальная скорость
-    } else {
-      // Интерполяция между 0.05 и 0.2
-      // При 0.05 -> 0.25, при 0.2 -> 1.0
-      float t = (normalizedValue - 0.05) / (0.2 - 0.05);
-      scale = 0.25 + t * (1.0 - 0.25); // от 0.25 до 1.0
-    }
-
-    speed = (int)(speed * scale);
-
-    return (accelValue < 0) ? -speed : speed;
+  return (accelValue < 0) ? -speed : speed;
 }
 
+// ------------------------------------------------------------------------------------
+// BUTTON HANDLING
+// ------------------------------------------------------------------------------------
 void handleButtons() {
-  int buttons[7] = {pinLeftButton, pinRightButton, pinMiddleButton, pinForwardButton, pinBackButton, pinCopyButton, pinPasteButton};
+  int buttons[7] = {
+    pinLeftButton,
+    pinRightButton,
+    pinMiddleButton,
+    pinForwardButton,
+    pinBackButton,
+    pinCopyButton,
+    pinPasteButton
+  };
 
   for (int i = 0; i < 7; i++) {
     bool reading = !digitalRead(buttons[i]);
@@ -324,69 +332,219 @@ void handleButtons() {
       if (reading && !buttonPressed[i]) {
         performButtonFunction(i);
         buttonPressed[i] = true;
-      } else if (!reading && buttonPressed[i]) {
+      }
+      else if (!reading && buttonPressed[i]) {
         releaseButtonFunction(i);
         buttonPressed[i] = false;
       }
     }
-
     buttonStates[i] = reading;
   }
 }
 
-void handleScroll() {
-    int16_t ax2, ay2, az2;
-    mpu2.getAcceleration(&ax2, &ay2, &az2);
+// ------------------------------------------------------------------------------------
+// PERFORM BUTTON FUNCTION (ON BUTTON PRESS)
+// ------------------------------------------------------------------------------------
+void performButtonFunction(int buttonIndex) {
+  String function = buttonFunctions[buttonIndex];
 
-    // Убираем смещения
-    ax2 -= offset_ax2;
-    ay2 -= offset_ay2;
-    az2 -= offset_az2;
+  // Known actions:
+  if (function == "LeftClick") {
+    Mouse.press(MOUSE_LEFT);
+  }
+  else if (function == "RightClick") {
+    Mouse.press(MOUSE_RIGHT);
+  }
+  else if (function == "MiddleClick") {
+    Mouse.press(MOUSE_MIDDLE);
+  }
+  else if (function == "Forward") {
+    Keyboard.press(KEY_LEFT_ALT);
+    Keyboard.press(KEY_RIGHT_ARROW);
+    Keyboard.releaseAll();
+  }
+  else if (function == "Back") {
+    Keyboard.press(KEY_LEFT_ALT);
+    Keyboard.press(KEY_LEFT_ARROW);
+    Keyboard.releaseAll();
+  }
+  else if (function == "Copy") {
+    Keyboard.press(KEY_LEFT_CTRL);
+    Keyboard.press('c');
+    Keyboard.releaseAll();
+  }
+  else if (function == "Paste") {
+    Keyboard.press(KEY_LEFT_CTRL);
+    Keyboard.press('v');
+    Keyboard.releaseAll();
+  }
+  else if (function == "Ctrl") {
+    Keyboard.press(KEY_LEFT_CTRL);
+  }
+  else if (function == "Alt") {
+    Keyboard.press(KEY_LEFT_ALT);
+  }
+  else if (function == "Shift") {
+    Keyboard.press(KEY_LEFT_SHIFT);
+  }
+  else {
+    // If it doesn't match any known function, consider it as "Custom"
+    pressCustomCombination(function);
+  }
+}
 
-    // Вычисляем угол
-    int16_t tilt = ay2;
-    float rawAngle = (float)tilt / 16384.0 * 90.0;
+// ------------------------------------------------------------------------------------
+// RELEASE BUTTON FUNCTION (ON BUTTON RELEASE)
+// ------------------------------------------------------------------------------------
+void releaseButtonFunction(int buttonIndex) {
+  String function = buttonFunctions[buttonIndex];
 
-    // Сглаживаем угол
-    float smoothedAngle = calculateSmoothedAngle(rawAngle);
+  if (function == "LeftClick") {
+    Mouse.release(MOUSE_LEFT);
+  }
+  else if (function == "RightClick") {
+    Mouse.release(MOUSE_RIGHT);
+  }
+  else if (function == "MiddleClick") {
+    Mouse.release(MOUSE_MIDDLE);
+  }
+  else if (function == "Ctrl") {
+    Keyboard.release(KEY_LEFT_CTRL);
+  }
+  else if (function == "Alt") {
+    Keyboard.release(KEY_LEFT_ALT);
+  }
+  else if (function == "Shift") {
+    Keyboard.release(KEY_LEFT_SHIFT);
+  }
+  // For "Custom", we already press/release inside pressCustomCombination() immediately
+  // If holding is needed, the logic will need to be changed
+}
 
-    // Более агрессивное сглаживание через интерполяцию
-    static float interpolatedAngle = 0.0;
-    float lerpFactor = 0.3; // Чем выше, тем быстрее угол будет следовать за текущим значением
-    interpolatedAngle += (smoothedAngle - interpolatedAngle) * lerpFactor;
+// ------------------------------------------------------------------------------------
+// PARSE AND PRESS CUSTOM COMBINATION
+// (e.g., "Ctrl+Shift+K")
+// ------------------------------------------------------------------------------------
+void pressCustomCombination(String combo) {
+  // Split the string by '+'
+  String parts[8];
+  int partCount = 0;
+  int start = 0;
 
-    // Рассчитываем скорость исходя из угла
-    float angleAbs = fabs(interpolatedAngle);
-    if (angleAbs > MIN_ANGLE) {
-        int direction = (interpolatedAngle > 0) ? 1 : -1;
+  while (true) {
+    int plusIndex = combo.indexOf('+', start);
+    if (plusIndex == -1) {
+      // last fragment
+      parts[partCount++] = combo.substring(start);
+      break;
+    }
+    else {
+      parts[partCount++] = combo.substring(start, plusIndex);
+      start = plusIndex + 1;
+    }
+    if (partCount >= 8) break; // limit the number of fragments
+  }
 
-        // Нормализуем угол от MIN_ANGLE до MAX_ANGLE в диапазон [0..1]
-        float normalizedAngle = (angleAbs - MIN_ANGLE) / (float)(MAX_ANGLE - MIN_ANGLE);
-        if (normalizedAngle < 0) normalizedAngle = 0;
-        if (normalizedAngle > 1) normalizedAngle = 1;
+  // Check if the Shift modifier is specified in the combination
+  bool shiftSpecified = false;
+  for (int i = 0; i < partCount; i++) {
+    String token = parts[i];
+    token.trim();
+    if (token.equalsIgnoreCase("SHIFT")) {
+      shiftSpecified = true;
+      break;
+    }
+  }
 
-        // Квадратичная зависимость скорости: при малом угле скорость ~1,
-        // при максимальном угле скорость ~scrollSpeed (или даже немного больше, если хотите)
-        float baseSpeed = 0.03 + (scrollSpeed - 0.03) * (normalizedAngle * normalizedAngle);
+  // Process each fragment
+  for (int i = 0; i < partCount; i++) {
+    String token = parts[i];
+    token.trim();
 
-        // Добавляем инкремент к аккумулятору. Можно увеличить множитель для усиления эффекта
-        scrollAccumulator += baseSpeed * direction * INVERT_SCROLL * 0.2; 
-        // Если при этом скорость все еще мала, увеличьте 0.2 до 0.5 или 1.0
-    } else {
-        // При отсутствии достаточного наклона плавно снижаем скорость
-        scrollAccumulator *= 0.95;
-        // Если накопитель очень мал, обнулим, чтобы исключить дрожание
-        if (fabs(scrollAccumulator) < 0.001) {
-            scrollAccumulator = 0.0;
+    if (token.equalsIgnoreCase("CTRL")) {
+      Keyboard.press(KEY_LEFT_CTRL);
+    }
+    else if (token.equalsIgnoreCase("SHIFT")) {
+      Keyboard.press(KEY_LEFT_SHIFT);
+    }
+    else if (token.equalsIgnoreCase("ALT")) {
+      Keyboard.press(KEY_LEFT_ALT);
+    }
+    else if (token.equalsIgnoreCase("GUI") || token.equalsIgnoreCase("WIN")) {
+      Keyboard.press(KEY_LEFT_GUI);
+    }
+    else {
+       // If the token is a single character, check if it is a letter
+      if (token.length() == 1) {
+        char c = token.charAt(0);
+        
+        if (!shiftSpecified && ((c >= 'A' && c <= 'Z') || (c >= 'А' && c <= 'Я'))) {
+          c = tolower(c);
         }
+        Keyboard.press(c);
+      }
+      else {
+      
+        if (token.equalsIgnoreCase("ENTER")) {
+          Keyboard.press(KEY_ENTER);
+        }
+        else if (token.equalsIgnoreCase("ESC")) {
+          Keyboard.press(KEY_ESC);
+        }
+        else if (token.equalsIgnoreCase("F1")) {
+          Keyboard.press(KEY_F1);
+        }
+        else if (token.equalsIgnoreCase("F2")) {
+          Keyboard.press(KEY_F2);
+        }
+      }
     }
+  }
 
-    // Теперь отправляем скролл, когда накопилось достаточно для шага
-    int steps = (int)floor(scrollAccumulator);
-    if (steps != 0) {
-        Mouse.move(0, 0, steps);
-        scrollAccumulator -= steps;
+
+  delay(50);
+
+  Keyboard.releaseAll();
+}
+
+void handleScroll() {
+  int16_t ax2, ay2, az2;
+  mpu2.getAcceleration(&ax2, &ay2, &az2);
+
+  ax2 -= offset_ax2;
+  ay2 -= offset_ay2;
+  az2 -= offset_az2;
+
+  float rawAngle = (float)ay2 / 16384.0 * 90.0;
+
+  static float emaScrollAngle = 0.0;
+  float alphaScroll = 0.2;
+  emaScrollAngle = alphaScroll * rawAngle + (1 - alphaScroll) * emaScrollAngle;
+
+  float angleAbs = fabs(emaScrollAngle);
+
+  if (angleAbs > MIN_ANGLE) {
+    int direction = (emaScrollAngle > 0) ? 1 : -1;
+    float normalizedAngle = (angleAbs - MIN_ANGLE) / (float)(MAX_ANGLE - MIN_ANGLE);
+    normalizedAngle = constrain(normalizedAngle, 0.0, 1.0);
+
+    float logistic = 1.0 / (1.0 + exp(-12 * (normalizedAngle - 0.5)));
+    float baseSpeed = 0.03 + (scrollSpeed - 0.03) * logistic;
+
+    scrollAccumulator += baseSpeed * direction * INVERT_SCROLL * 0.2;
+  }
+  else {
+    scrollAccumulator *= 0.95;
+    if (fabs(scrollAccumulator) < 0.001) {
+      scrollAccumulator = 0.0;
     }
+  }
+
+  int steps = (int)floor(scrollAccumulator);
+  if (steps != 0) {
+    Mouse.move(0, 0, steps);
+    scrollAccumulator -= steps;
+  }
 }
 
 void handleEncoder() {
@@ -400,9 +558,11 @@ void handleEncoder() {
         case VOLUME_CONTROL:
           Consumer.write(MEDIA_VOLUME_UP);
           break;
+
         case HORIZONTAL_SCROLL:
           Mouse.move(-1, 0, 0);
           break;
+
         case ZOOM_CONTROL:
           Keyboard.press(KEY_LEFT_CTRL);
           Keyboard.press(KEY_LEFT_SHIFT);
@@ -410,15 +570,18 @@ void handleEncoder() {
           Keyboard.releaseAll();
           break;
       }
-    } else {
+    }
+    else {
       volumePosition--;
       switch(currentEncoderMode) {
         case VOLUME_CONTROL:
           Consumer.write(MEDIA_VOLUME_DOWN);
           break;
+
         case HORIZONTAL_SCROLL:
           Mouse.move(1, 0, 0);
           break;
+
         case ZOOM_CONTROL:
           Keyboard.press(KEY_LEFT_CTRL);
           Keyboard.press('-');
@@ -436,14 +599,14 @@ void handleSerialInput() {
   if (Serial.available()) {
     String command = Serial.readStringUntil('\n');
     command.trim();
-    
+
     bool settingsChanged = false;
 
     if (command.startsWith("CURSOR_SPEED:")) {
       cursorSpeed = command.substring(13).toInt();
       cursorSpeed = constrain(cursorSpeed, 1, 10);
       settingsChanged = true;
-    } 
+    }
     else if (command.startsWith("SCROLL_SPEED:")) {
       scrollSpeed = command.substring(13).toInt();
       scrollSpeed = constrain(scrollSpeed, 1, 10);
@@ -453,25 +616,33 @@ void handleSerialInput() {
       command = command.substring(4);
       int firstColon = command.indexOf(':');
       int secondColon = command.indexOf(':', firstColon + 1);
-      
+
       if (firstColon != -1 && secondColon != -1) {
         int buttonPin = command.substring(0, firstColon).toInt();
         String function = command.substring(firstColon + 1, secondColon);
-        
+
         int buttonIndex = -1;
-        int pins[] = {pinLeftButton, pinRightButton, pinMiddleButton, 
-                 pinForwardButton, pinBackButton, pinCopyButton, pinPasteButton};
-        
+        int pins[] = {
+          pinLeftButton,
+          pinRightButton,
+          pinMiddleButton,
+          pinForwardButton,
+          pinBackButton,
+          pinCopyButton,
+          pinPasteButton
+        };
+
         for (int i = 0; i < 7; i++) {
           if (pins[i] == buttonPin) {
             buttonIndex = i;
             break;
           }
         }
-        
+
         if (buttonIndex != -1) {
           buttonFunctions[buttonIndex] = function;
           settingsChanged = true;
+
           Serial.print("BTN_SET:");
           Serial.print(buttonPin);
           Serial.print(":");
@@ -479,65 +650,17 @@ void handleSerialInput() {
         }
       }
     }
-    
+    else if (command == "RESET:ALL") {
+      setDefaultSettings();
+      saveAllSettings();
+      Serial.println("OK:RESET");
+    }
+
     if (settingsChanged) {
       saveAllSettings();
       Serial.println("Settings saved to EEPROM");
     }
   }
 }
-
 void debugOutput() {
-}
-
-void performButtonFunction(int buttonIndex) {
-  String function = buttonFunctions[buttonIndex];
-
-  if (function == "LeftClick") {
-    Mouse.press(MOUSE_LEFT);
-  } else if (function == "RightClick") {
-    Mouse.press(MOUSE_RIGHT);
-  } else if (function == "MiddleClick") {
-    Mouse.press(MOUSE_MIDDLE);
-  } else if (function == "Forward") {
-    Keyboard.press(KEY_LEFT_ALT);
-    Keyboard.press(KEY_RIGHT_ARROW);
-    Keyboard.releaseAll();
-  } else if (function == "Back") {
-    Keyboard.press(KEY_LEFT_ALT);
-    Keyboard.press(KEY_LEFT_ARROW);
-    Keyboard.releaseAll();
-  } else if (function == "Copy") {
-    Keyboard.press(KEY_LEFT_CTRL);
-    Keyboard.press('c');
-    Keyboard.releaseAll();
-  } else if (function == "Paste") {
-    Keyboard.press(KEY_LEFT_CTRL);
-    Keyboard.press('v');
-    Keyboard.releaseAll();
-  } else if (function == "Ctrl") {
-    Keyboard.press(KEY_LEFT_CTRL);
-  } else if (function == "Alt") {
-    Keyboard.press(KEY_LEFT_ALT);
-  } else if (function == "Shift") {
-    Keyboard.press(KEY_LEFT_SHIFT);
-  }
-}
-
-void releaseButtonFunction(int buttonIndex) {
-  String function = buttonFunctions[buttonIndex];
-
-  if (function == "LeftClick") {
-    Mouse.release(MOUSE_LEFT);
-  } else if (function == "RightClick") {
-    Mouse.release(MOUSE_RIGHT);
-  } else if (function == "MiddleClick") {
-    Mouse.release(MOUSE_MIDDLE);
-  } else if (function == "Ctrl") {
-    Keyboard.release(KEY_LEFT_CTRL);
-  } else if (function == "Alt") {
-    Keyboard.release(KEY_LEFT_ALT);
-  } else if (function == "Shift") {
-    Keyboard.release(KEY_LEFT_SHIFT);
-  }
 }
