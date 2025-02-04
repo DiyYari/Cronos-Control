@@ -21,9 +21,11 @@ MPU6050 mpu2(0x69);
 #define INVERT_SCROLL          1
 #define PRECISION_FACTOR       0.5
 
-#define MAX_SCROLL_SPEED       10
-#define MIN_ANGLE              4
-#define MAX_ANGLE              15
+// Updated angle parameters:
+// The dead zone is increased so that no scrolling occurs until the absolute angle exceeds 3°.
+// Full scroll control is achieved at 15°.
+#define MIN_ANGLE              3     // Minimal angle for scrolling to start (in degrees)
+#define MAX_ANGLE              25    // Angle (in degrees) at which full scroll speed is achieved
 
 #define MIN_SPEED              1
 #define EXPONENTIAL_FACTOR     1
@@ -43,6 +45,7 @@ MPU6050 mpu2(0x69);
 int cursorSpeed = 1;
 int scrollSpeed = 3;
 
+// Encoder modes
 enum EncoderMode {
   VOLUME_CONTROL,
   HORIZONTAL_SCROLL,
@@ -182,6 +185,7 @@ void setup() {
   mpu1.initialize();
   mpu2.initialize();
 
+  // Uncomment below to test MPU connection:
   // if (!mpu1.testConnection() || !mpu2.testConnection()) { while(1); }
 
   delay(1000);
@@ -205,16 +209,15 @@ void setup() {
 void loop() {
   processMouseMovement();
   handleButtons();
-  handleScroll();
+  handleScroll();  // Updated scroll function with new dead zone and angle limits
   handleEncoder();
 
   if (Serial.available() > 0) {
     handleSerialInput();
   }
 
-  // Example of periodic debug output
+  // Example periodic debug (if needed)
   if (millis() - lastDebugTime > DEBUG_INTERVAL) {
-    debugOutput();
     lastDebugTime = millis();
   }
 
@@ -278,12 +281,6 @@ void processMouseMovement() {
   int mouseX = calculateAdjustedSpeed(filteredAx) * invertX;
   int mouseY = calculateAdjustedSpeed(filteredAy) * invertY;
 
-  // If you want precision mode when holding an additional button, you can do it here
-  // if (digitalRead(pinPrecisionMode) == LOW) {
-  //     mouseX *= PRECISION_FACTOR;
-  //     mouseY *= PRECISION_FACTOR;
-  // }
-
   if (mouseX != 0 || mouseY != 0) {
     Mouse.move(mouseX, mouseY, 0);
   }
@@ -297,7 +294,6 @@ int calculateAdjustedSpeed(float accelValue) {
   float normalizedValue = (abs(accelValue) - THRESHOLD) / (16384.0 - THRESHOLD);
   normalizedValue = constrain(normalizedValue, 0.0, 1.0);
 
-  // Small power function to accelerate at larger tilts
   float scaling = (cursorSpeed / 10.0);
   float factor  = scaling * pow(normalizedValue, 1.5);
 
@@ -342,13 +338,9 @@ void handleButtons() {
   }
 }
 
-// ------------------------------------------------------------------------------------
-// PERFORM BUTTON FUNCTION (ON BUTTON PRESS)
-// ------------------------------------------------------------------------------------
 void performButtonFunction(int buttonIndex) {
   String function = buttonFunctions[buttonIndex];
 
-  // Known actions:
   if (function == "LeftClick") {
     Mouse.press(MOUSE_LEFT);
   }
@@ -388,14 +380,10 @@ void performButtonFunction(int buttonIndex) {
     Keyboard.press(KEY_LEFT_SHIFT);
   }
   else {
-    // If it doesn't match any known function, consider it as "Custom"
     pressCustomCombination(function);
   }
 }
 
-// ------------------------------------------------------------------------------------
-// RELEASE BUTTON FUNCTION (ON BUTTON RELEASE)
-// ------------------------------------------------------------------------------------
 void releaseButtonFunction(int buttonIndex) {
   String function = buttonFunctions[buttonIndex];
 
@@ -417,16 +405,9 @@ void releaseButtonFunction(int buttonIndex) {
   else if (function == "Shift") {
     Keyboard.release(KEY_LEFT_SHIFT);
   }
-  // For "Custom", we already press/release inside pressCustomCombination() immediately
-  // If holding is needed, the logic will need to be changed
 }
 
-// ------------------------------------------------------------------------------------
-// PARSE AND PRESS CUSTOM COMBINATION
-// (e.g., "Ctrl+Shift+K")
-// ------------------------------------------------------------------------------------
 void pressCustomCombination(String combo) {
-  // Split the string by '+'
   String parts[8];
   int partCount = 0;
   int start = 0;
@@ -434,18 +415,15 @@ void pressCustomCombination(String combo) {
   while (true) {
     int plusIndex = combo.indexOf('+', start);
     if (plusIndex == -1) {
-      // last fragment
       parts[partCount++] = combo.substring(start);
       break;
-    }
-    else {
+    } else {
       parts[partCount++] = combo.substring(start, plusIndex);
       start = plusIndex + 1;
     }
-    if (partCount >= 8) break; // limit the number of fragments
+    if (partCount >= 8) break;
   }
 
-  // Check if the Shift modifier is specified in the combination
   bool shiftSpecified = false;
   for (int i = 0; i < partCount; i++) {
     String token = parts[i];
@@ -456,7 +434,6 @@ void pressCustomCombination(String combo) {
     }
   }
 
-  // Process each fragment
   for (int i = 0; i < partCount; i++) {
     String token = parts[i];
     token.trim();
@@ -474,17 +451,14 @@ void pressCustomCombination(String combo) {
       Keyboard.press(KEY_LEFT_GUI);
     }
     else {
-       // If the token is a single character, check if it is a letter
       if (token.length() == 1) {
         char c = token.charAt(0);
-        
         if (!shiftSpecified && ((c >= 'A' && c <= 'Z') || (c >= 'А' && c <= 'Я'))) {
           c = tolower(c);
         }
         Keyboard.press(c);
       }
       else {
-      
         if (token.equalsIgnoreCase("ENTER")) {
           Keyboard.press(KEY_ENTER);
         }
@@ -501,52 +475,128 @@ void pressCustomCombination(String combo) {
     }
   }
 
-
   delay(50);
-
   Keyboard.releaseAll();
 }
 
+// ------------------------------------------------------------------------------------
+// SCROLL HANDLING WITH DEBUG OUTPUT AND FREEZE ON DIRECTION REVERSAL
+// ------------------------------------------------------------------------------------
+
+// Set DEBUG_SCROLL to true to output debugging info to the Serial Monitor.
+#define DEBUG_SCROLL true
+unsigned long lastScrollDebugTime = 0;
+
 void handleScroll() {
+  // Read data from MPU2 and apply calibration offsets
   int16_t ax2, ay2, az2;
   mpu2.getAcceleration(&ax2, &ay2, &az2);
-
   ax2 -= offset_ax2;
   ay2 -= offset_ay2;
   az2 -= offset_az2;
-
+  
+  // Convert accelerometer reading to an approximate angle in degrees
   float rawAngle = (float)ay2 / 16384.0 * 90.0;
-
+  
+  // Use an exponential moving average (EMA) to smooth the angle
   static float emaScrollAngle = 0.0;
-  float alphaScroll = 0.2;
-  emaScrollAngle = alphaScroll * rawAngle + (1 - alphaScroll) * emaScrollAngle;
-
-  float angleAbs = fabs(emaScrollAngle);
-
-  if (angleAbs > MIN_ANGLE) {
-    int direction = (emaScrollAngle > 0) ? 1 : -1;
-    float normalizedAngle = (angleAbs - MIN_ANGLE) / (float)(MAX_ANGLE - MIN_ANGLE);
-    normalizedAngle = constrain(normalizedAngle, 0.0, 1.0);
-
-    float logistic = 1.0 / (1.0 + exp(-12 * (normalizedAngle - 0.5)));
-    float baseSpeed = 0.03 + (scrollSpeed - 0.03) * logistic;
-
-    scrollAccumulator += baseSpeed * direction * INVERT_SCROLL * 0.2;
-  }
-  else {
-    scrollAccumulator *= 0.95;
-    if (fabs(scrollAccumulator) < 0.001) {
-      scrollAccumulator = 0.0;
+  const float alphaScroll = 0.2;
+  
+  unsigned long now = millis();
+  
+  // Variables for freezing the scroll update when a reversal is detected
+  static bool freezeActive = false;       // True when in freeze mode
+  static unsigned long freezeStartTime = 0; // Time when freeze started
+  static int lastSign = 0;                  // Last stable direction (+1 or -1)
+  const unsigned long freezeDuration = 150; // Freeze period in ms
+  
+  // If freeze is active, ignore new accumulation and let the accumulator decay
+  if (freezeActive) {
+    if (now - freezeStartTime >= freezeDuration) {
+      freezeActive = false;
+      emaScrollAngle = rawAngle; // Reinitialize EMA to avoid a jump
+      if (DEBUG_SCROLL) {
+        Serial.println("Freeze period ended.");
+      }
+    } else {
+      scrollAccumulator *= 0.95; // Decay the accumulator during freeze
+      int steps = (int)floor(scrollAccumulator);
+      if (steps != 0) {
+        Mouse.move(0, 0, steps);
+        scrollAccumulator -= steps;
+      }
+      if (DEBUG_SCROLL && now - lastScrollDebugTime > 200) {
+        Serial.print("Freeze active | rawAngle: ");
+        Serial.print(rawAngle);
+        Serial.print(" | emaScrollAngle: ");
+        Serial.print(emaScrollAngle);
+        Serial.print(" | scrollAccumulator: ");
+        Serial.println(scrollAccumulator);
+        lastScrollDebugTime = now;
+      }
+      return; // Skip further processing during freeze
     }
   }
-
+  
+  // Update the EMA with the new rawAngle value
+  emaScrollAngle = alphaScroll * rawAngle + (1 - alphaScroll) * emaScrollAngle;
+  float angleAbs = fabs(emaScrollAngle);
+  int currentSign = (emaScrollAngle > 0) ? 1 : -1;
+  
+  // If the absolute angle is below MIN_ANGLE, reset the stable direction and accumulator
+  if (angleAbs < MIN_ANGLE) {
+    lastSign = 0;
+    scrollAccumulator = 0.0;
+  } else {
+    // If a stable direction exists and the current sign is different, a reversal is detected
+    if (lastSign != 0 && currentSign != lastSign) {
+      freezeActive = true;
+      freezeStartTime = now;
+      scrollAccumulator = 0.0;
+      lastSign = currentSign;
+      if (DEBUG_SCROLL) {
+        Serial.print("Direction reversal detected. Entering freeze. currentSign: ");
+        Serial.println(currentSign);
+      }
+      return;
+    }
+    // No reversal detected: update the stable direction and accumulate scroll.
+    lastSign = currentSign;
+    // Normalize the angle: map MIN_ANGLE to 0 and MAX_ANGLE to 1.
+    float normalizedAngle = (angleAbs - MIN_ANGLE) / (float)(MAX_ANGLE - MIN_ANGLE);
+    normalizedAngle = constrain(normalizedAngle, 0.0, 1.0);
+    // Use a logistic function for a smooth transition of scroll speed.
+    float logistic = 1.0 / (1.0 + exp(-12 * (normalizedAngle - 0.5)));
+    float baseSpeed = 0.03 + (scrollSpeed - 0.03) * logistic;
+    scrollAccumulator += baseSpeed * currentSign * INVERT_SCROLL * 0.2;
+  }
+  
   int steps = (int)floor(scrollAccumulator);
   if (steps != 0) {
     Mouse.move(0, 0, steps);
     scrollAccumulator -= steps;
   }
+  
+  if (DEBUG_SCROLL && now - lastScrollDebugTime > 200) {
+    Serial.print("rawAngle: ");
+    Serial.print(rawAngle);
+    Serial.print(" | emaScrollAngle: ");
+    Serial.print(emaScrollAngle);
+    Serial.print(" | freezeActive: ");
+    Serial.print(freezeActive);
+    Serial.print(" | currentSign: ");
+    Serial.print(currentSign);
+    Serial.print(" | scrollAccumulator: ");
+    Serial.print(scrollAccumulator);
+    Serial.print(" | steps: ");
+    Serial.println(steps);
+    lastScrollDebugTime = now;
+  }
 }
 
+// ------------------------------------------------------------------------------------
+// HANDLE ENCODER INPUT
+// ------------------------------------------------------------------------------------
 void handleEncoder() {
   int aState = digitalRead(pinVolumeEncoderA);
   int bState = digitalRead(pinVolumeEncoderB);
@@ -558,11 +608,9 @@ void handleEncoder() {
         case VOLUME_CONTROL:
           Consumer.write(MEDIA_VOLUME_UP);
           break;
-
         case HORIZONTAL_SCROLL:
           Mouse.move(-1, 0, 0);
           break;
-
         case ZOOM_CONTROL:
           Keyboard.press(KEY_LEFT_CTRL);
           Keyboard.press(KEY_LEFT_SHIFT);
@@ -570,18 +618,15 @@ void handleEncoder() {
           Keyboard.releaseAll();
           break;
       }
-    }
-    else {
+    } else {
       volumePosition--;
       switch(currentEncoderMode) {
         case VOLUME_CONTROL:
           Consumer.write(MEDIA_VOLUME_DOWN);
           break;
-
         case HORIZONTAL_SCROLL:
           Mouse.move(1, 0, 0);
           break;
-
         case ZOOM_CONTROL:
           Keyboard.press(KEY_LEFT_CTRL);
           Keyboard.press('-');
@@ -590,18 +635,18 @@ void handleEncoder() {
       }
     }
   }
-
   lastVolumeStateA = aState;
   lastVolumeStateB = bState;
 }
 
+// ------------------------------------------------------------------------------------
+// HANDLE SERIAL INPUT FOR SETTINGS
+// ------------------------------------------------------------------------------------
 void handleSerialInput() {
   if (Serial.available()) {
     String command = Serial.readStringUntil('\n');
     command.trim();
-
     bool settingsChanged = false;
-
     if (command.startsWith("CURSOR_SPEED:")) {
       cursorSpeed = command.substring(13).toInt();
       cursorSpeed = constrain(cursorSpeed, 1, 10);
@@ -616,33 +661,20 @@ void handleSerialInput() {
       command = command.substring(4);
       int firstColon = command.indexOf(':');
       int secondColon = command.indexOf(':', firstColon + 1);
-
       if (firstColon != -1 && secondColon != -1) {
         int buttonPin = command.substring(0, firstColon).toInt();
         String function = command.substring(firstColon + 1, secondColon);
-
         int buttonIndex = -1;
-        int pins[] = {
-          pinLeftButton,
-          pinRightButton,
-          pinMiddleButton,
-          pinForwardButton,
-          pinBackButton,
-          pinCopyButton,
-          pinPasteButton
-        };
-
+        int pins[] = { pinLeftButton, pinRightButton, pinMiddleButton, pinForwardButton, pinBackButton, pinCopyButton, pinPasteButton };
         for (int i = 0; i < 7; i++) {
           if (pins[i] == buttonPin) {
             buttonIndex = i;
             break;
           }
         }
-
         if (buttonIndex != -1) {
           buttonFunctions[buttonIndex] = function;
           settingsChanged = true;
-
           Serial.print("BTN_SET:");
           Serial.print(buttonPin);
           Serial.print(":");
@@ -655,12 +687,16 @@ void handleSerialInput() {
       saveAllSettings();
       Serial.println("OK:RESET");
     }
-
     if (settingsChanged) {
       saveAllSettings();
       Serial.println("Settings saved to EEPROM");
     }
   }
 }
+
+// ------------------------------------------------------------------------------------
+// OPTIONAL DEBUG OUTPUT (currently empty)
+// ------------------------------------------------------------------------------------
 void debugOutput() {
+  // Additional debug output can be added here if needed.
 }
