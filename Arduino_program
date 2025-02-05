@@ -508,7 +508,7 @@ void handleScroll() {
   static bool freezeActive = false;       // True when in freeze mode
   static unsigned long freezeStartTime = 0; // Time when freeze started
   static int lastSign = 0;                  // Last stable direction (+1 or -1)
-  const unsigned long freezeDuration = 150; // Freeze period in ms
+  const unsigned long freezeDuration = 250; // Freeze period in ms
   
   // If freeze is active, ignore new accumulation and let the accumulator decay
   if (freezeActive) {
@@ -700,3 +700,7 @@ void handleSerialInput() {
 void debugOutput() {
   // Additional debug output can be added here if needed.
 }
+
+
+
+
