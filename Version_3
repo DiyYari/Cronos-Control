@@ -1,0 +1,263 @@
+#include <EEPROM.h>
+#include <Arduino.h>
+#include <Wire.h>
+#include <MPU6050.h>
+#include <HID-Project.h>
+#include <math.h> 
+
+MPU6050 mpu1(0x68);
+MPU6050 mpu2(0x69);
+
+#define MAX_TILT_RANGE 5000.0  
+#define BASE_THRESHOLD 150.0  
+#define CURVE_POWER 2.5 
+#define ABSOLUTE_MAX_SPEED 127
+#define MAX_JERK_LIMIT 600.0 
+
+float remainderX = 0.0;
+float remainderY = 0.0;
+float scrollAccumulator = 0.0;
+bool precisionMode = false; 
+float precisionFactor = 0.4; 
+
+#define EEPROM_INITIALIZED_FLAG 0
+#define EEPROM_CURSOR_SPEED 1
+#define EEPROM_SCROLL_SPEED 2
+#define EEPROM_BUTTON_FUNCTIONS 3
+#define EEPROM_PRECISION_FACTOR 22
+
+int cursorSpeed = 6;
+int scrollSpeed = 3;
+int invertX = -1;
+int invertY = 1;
+
+float emaAx = 0.0;
+float emaAy = 0.0;
+float prevInputAx = 0.0;
+float prevInputAy = 0.0;
+
+int16_t offset_ax1 = 0, offset_ay1 = 0, offset_az1 = 0;
+int16_t offset_ax2 = 0, offset_ay2 = 0, offset_az2 = 0;
+
+const int pinLeftButton = 9;
+const int pinRightButton = 8;
+const int pinMiddleButton = 18;
+const int pinForwardButton = 7;
+const int pinBackButton = 6;
+const int pinCopyButton = 4;
+const int pinPasteButton = 5;
+const int pinVolumeEncoderA = 10;
+const int pinVolumeEncoderB = 16;
+
+enum EncoderMode { VOLUME_CONTROL, HORIZONTAL_SCROLL, ZOOM_CONTROL };
+EncoderMode currentEncoderMode = VOLUME_CONTROL;
+int lastVolumeStateA = HIGH;
+bool buttonStates[7] = {0};
+bool buttonPressed[7] = {0};
+unsigned long lastDebounceTime[7] = {0};
+const unsigned long debounceDelay = 50;
+
+String buttonFunctions[7] = {"LeftClick", "RightClick", "MiddleClick", "Forward", "Back", "Copy", "Paste"};
+struct ButtonFunction { char name[15]; };
+
+void saveButtonFunction(int buttonIndex, String function) {
+  int address = EEPROM_BUTTON_FUNCTIONS + (buttonIndex * sizeof(ButtonFunction));
+  ButtonFunction bf;
+  function.toCharArray(bf.name, sizeof(bf.name) - 1); 
+  EEPROM.put(address, bf);
+}
+
+String loadButtonFunction(int buttonIndex) {
+  int address = EEPROM_BUTTON_FUNCTIONS + (buttonIndex * sizeof(ButtonFunction));
+  ButtonFunction bf;
+  EEPROM.get(address, bf);
+  return String(bf.name);
+}
+
+void saveAllSettings() {
+  EEPROM.write(EEPROM_INITIALIZED_FLAG, 0xAA);
+  EEPROM.write(EEPROM_CURSOR_SPEED, cursorSpeed);
+  EEPROM.write(EEPROM_SCROLL_SPEED, scrollSpeed);
+  EEPROM.put(EEPROM_PRECISION_FACTOR, precisionFactor);
+  for (int i = 0; i < 7; i++) saveButtonFunction(i, buttonFunctions[i]);
+}
+
+void setDefaultSettings() {
+  cursorSpeed = 6; scrollSpeed = 4; precisionFactor = 0.4;
+  buttonFunctions[0] = "LeftClick"; buttonFunctions[1] = "RightClick"; buttonFunctions[2] = "MiddleClick";
+  buttonFunctions[3] = "Forward"; buttonFunctions[4] = "Back"; buttonFunctions[5] = "Copy"; buttonFunctions[6] = "Paste";
+}
+
+void loadAllSettings() {
+  if (EEPROM.read(EEPROM_INITIALIZED_FLAG) != 0xAA) { setDefaultSettings(); saveAllSettings(); return; }
+  cursorSpeed = EEPROM.read(EEPROM_CURSOR_SPEED);
+  scrollSpeed = EEPROM.read(EEPROM_SCROLL_SPEED);
+  EEPROM.get(EEPROM_PRECISION_FACTOR, precisionFactor);
+  for (int i = 0; i < 7; i++) buttonFunctions[i] = loadButtonFunction(i);
+}
+
+void calibrateSensors() {
+  int16_t ax, ay, az;
+  long sum_ax1=0, sum_ay1=0, sum_az1=0;
+  long sum_ax2=0, sum_ay2=0, sum_az2=0;
+  Serial.println("Calibrating...");
+  for (int i=0; i<100; i++) {
+    mpu1.getAcceleration(&ax, &ay, &az); sum_ax1+=ax; sum_ay1+=ay; sum_az1+=az;
+    mpu2.getAcceleration(&ax, &ay, &az); sum_ax2+=ax; sum_ay2+=ay; sum_az2+=az;
+    delay(5);
+  }
+  offset_ax1=sum_ax1/100; offset_ay1=sum_ay1/100; offset_az1=sum_az1/100;
+  offset_ax2=sum_ax2/100; offset_ay2=sum_ay2/100; offset_az2=sum_az2/100;
+  Serial.println("Done.");
+}
+
+float getDynamicAlpha(float val) {
+  if (abs(val) < 600) return 0.05;
+  else return 0.25;
+}
+
+void processMouseMovement() {
+  int16_t ax1, ay1, az1;
+  mpu1.getAcceleration(&ax1, &ay1, &az1);
+  ax1 -= offset_ax1;
+  ay1 -= offset_ay1;
+
+  float rawAx = (float)ax1;
+  float rawAy = (float)-ax1; 
+  float trueAy = (float)ay1; 
+
+  float diffX = trueAy - prevInputAx;
+  if (diffX > MAX_JERK_LIMIT) diffX = MAX_JERK_LIMIT;
+  if (diffX < -MAX_JERK_LIMIT) diffX = -MAX_JERK_LIMIT;
+  float cleanAx = prevInputAx + diffX;
+  prevInputAx = cleanAx;
+
+  float diffY = rawAy - prevInputAy;
+  if (diffY > MAX_JERK_LIMIT) diffY = MAX_JERK_LIMIT;
+  if (diffY < -MAX_JERK_LIMIT) diffY = -MAX_JERK_LIMIT;
+  float cleanAy = prevInputAy + diffY;
+  prevInputAy = cleanAy;
+
+  float alphaX = getDynamicAlpha(cleanAx);
+  float alphaY = getDynamicAlpha(cleanAy);
+  emaAx = alphaX * cleanAx + (1 - alphaX) * emaAx;
+  emaAy = alphaY * cleanAy + (1 - alphaY) * emaAy;
+
+  float magnitude = sqrt(emaAx * emaAx + emaAy * emaAy);
+  float speedX = 0.0;
+  float speedY = 0.0;
+
+  if (magnitude > BASE_THRESHOLD) {
+      float effectiveMag = magnitude - BASE_THRESHOLD;
+      float normalizedMag = effectiveMag / MAX_TILT_RANGE;
+      if (normalizedMag > 1.0) normalizedMag = 1.0;
+
+      float curveMag = pow(normalizedMag, CURVE_POWER);
+      float maxSpeedPixels = cursorSpeed * 12.0;
+      float totalSpeed = curveMag * maxSpeedPixels;
+
+      if (precisionMode) totalSpeed *= precisionFactor;
+
+      speedX = totalSpeed * (emaAx / magnitude) * invertX;
+      speedY = totalSpeed * (emaAy / magnitude) * invertY;
+  } else {
+      remainderX = 0;
+      remainderY = 0;
+  }
+
+  remainderX += speedX;
+  remainderY += speedY;
+
+  int moveX = (int)remainderX;
+  int moveY = (int)remainderY;
+
+  remainderX -= moveX;
+  remainderY -= moveY;
+
+  moveX = constrain(moveX, -ABSOLUTE_MAX_SPEED, ABSOLUTE_MAX_SPEED);
+  moveY = constrain(moveY, -ABSOLUTE_MAX_SPEED, ABSOLUTE_MAX_SPEED);
+
+  if (moveX != 0 || moveY != 0) {
+    Mouse.move(moveX, moveY, 0);
+  }
+}
+
+void handleButtons() {
+  int buttons[] = {pinLeftButton, pinRightButton, pinMiddleButton, pinForwardButton, pinBackButton, pinCopyButton, pinPasteButton};
+  for (int i=0; i<7; i++) {
+    bool reading = !digitalRead(buttons[i]);
+    if (reading != buttonStates[i]) lastDebounceTime[i] = millis();
+    if ((millis() - lastDebounceTime[i]) > debounceDelay) {
+      if (reading && !buttonPressed[i]) { performButtonFunction(i); buttonPressed[i] = true; }
+      else if (!reading && buttonPressed[i]) { releaseButtonFunction(i); buttonPressed[i] = false; }
+    }
+    buttonStates[i] = reading;
+  }
+}
+
+void performButtonFunction(int idx) {
+  String f = buttonFunctions[idx];
+  if (f=="LeftClick") Mouse.press(MOUSE_LEFT);
+  else if (f=="RightClick") Mouse.press(MOUSE_RIGHT);
+  else if (f=="MiddleClick") Mouse.press(MOUSE_MIDDLE);
+  else if (f=="Forward") { Keyboard.press(KEY_LEFT_ALT); Keyboard.press(KEY_RIGHT_ARROW); Keyboard.releaseAll(); }
+  else if (f=="Back") { Keyboard.press(KEY_LEFT_ALT); Keyboard.press(KEY_LEFT_ARROW); Keyboard.releaseAll(); }
+  else if (f=="Copy") { Keyboard.press(KEY_LEFT_CTRL); Keyboard.press('c'); Keyboard.releaseAll(); }
+  else if (f=="Paste") { Keyboard.press(KEY_LEFT_CTRL); Keyboard.press('v'); Keyboard.releaseAll(); }
+}
+
+void releaseButtonFunction(int idx) {
+  String f = buttonFunctions[idx];
+  if (f=="LeftClick") Mouse.release(MOUSE_LEFT);
+  else if (f=="RightClick") Mouse.release(MOUSE_RIGHT);
+  else if (f=="MiddleClick") Mouse.release(MOUSE_MIDDLE);
+}
+
+void handleScroll() {
+  int16_t ax2, ay2, az2;
+  mpu2.getAcceleration(&ax2, &ay2, &az2);
+  ax2 -= offset_ax2; ay2 -= offset_ay2;
+  float angle = (float)ay2 / 16384.0 * 90.0;
+  if (abs(angle) > 4) { 
+      float s = (abs(angle) - 4) * (scrollSpeed / 10.0);
+      if (angle < 0) s = -s;
+      scrollAccumulator += s * 0.2 * 1; 
+  } else { scrollAccumulator = 0; }
+  int steps = (int)scrollAccumulator;
+  if (steps != 0) { Mouse.move(0, 0, steps); scrollAccumulator -= steps; }
+}
+
+void handleEncoder() {
+  int a = digitalRead(pinVolumeEncoderA);
+  if (a != lastVolumeStateA) {
+    if (digitalRead(pinVolumeEncoderB) != a) Consumer.write(MEDIA_VOLUME_UP);
+    else Consumer.write(MEDIA_VOLUME_DOWN);
+  }
+  lastVolumeStateA = a;
+}
+
+void setup() {
+  Wire.begin();
+  Mouse.begin(); Keyboard.begin(); Consumer.begin();
+  Serial.begin(115200);
+  mpu1.initialize(); mpu2.initialize();
+  loadAllSettings();
+  pinMode(pinLeftButton, INPUT_PULLUP); pinMode(pinRightButton, INPUT_PULLUP);
+  pinMode(pinMiddleButton, INPUT_PULLUP); pinMode(pinForwardButton, INPUT_PULLUP);
+  pinMode(pinBackButton, INPUT_PULLUP); pinMode(pinCopyButton, INPUT_PULLUP);
+  pinMode(pinPasteButton, INPUT_PULLUP); pinMode(pinVolumeEncoderA, INPUT_PULLUP);
+  pinMode(pinVolumeEncoderB, INPUT_PULLUP);
+  calibrateSensors();
+}
+
+void loop() {
+  processMouseMovement();
+  handleButtons();
+  handleScroll();
+  handleEncoder();
+  if (Serial.available()) {
+    String c = Serial.readStringUntil('\n');
+    if (c.startsWith("SPEED:")) { cursorSpeed = c.substring(6).toInt(); saveAllSettings(); }
+  }
+  delay(2);
+}
